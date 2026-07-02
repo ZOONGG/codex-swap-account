@@ -1,0 +1,15 @@
+<Application x:Class="CodexProfileOverlay.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <SolidColorBrush x:Key="OverlayBackgroundBrush" Color="#202124" />
+        <SolidColorBrush x:Key="OverlayBorderBrush" Color="#3A3B40" />
+        <SolidColorBrush x:Key="TabBackgroundBrush" Color="#2A2B30" />
+        <SolidColorBrush x:Key="TabHoverBrush" Color="#343640" />
+        <SolidColorBrush x:Key="TabActiveBrush" Color="#393A44" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#B9BBC4" />
+        <SolidColorBrush x:Key="StrongTextBrush" Color="#F2F2F5" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#A970FF" />
+    </Application.Resources>
+</Application>

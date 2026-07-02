@@ -1,0 +1,8 @@
+bin/
+obj/
+.dotnet/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.log
