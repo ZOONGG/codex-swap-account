@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using CodexProfileOverlay.Core.Models;
@@ -30,6 +31,8 @@ internal sealed class SettingsWindow : Window
     private readonly TextBlock statusText = new();
     private readonly TextBlock conflictText = new();
     private readonly StackPanel navPanel = new();
+    private Border? sidebarPanel;
+    private Button? themeButton;
     private IReadOnlyList<ProfileInfo> profiles;
     private SettingsPage page = SettingsPage.General;
     private bool isRebuilding;
@@ -78,9 +81,14 @@ internal sealed class SettingsWindow : Window
 
         Content = BuildShell();
         localizer.LanguageChanged += Rebuild;
+        PreviewMouseDown += OnPreviewMouseDownCommitNumber;
         Rebuild();
         Closing += (_, _) => SaveGeometry();
-        Closed += (_, _) => localizer.LanguageChanged -= Rebuild;
+        Closed += (_, _) =>
+        {
+            localizer.LanguageChanged -= Rebuild;
+            PreviewMouseDown -= OnPreviewMouseDownCommitNumber;
+        };
     }
 
     public void UpdateProfiles(IReadOnlyList<ProfileInfo> newProfiles)
@@ -97,13 +105,26 @@ internal sealed class SettingsWindow : Window
         conflictText.Text = conflicts.Count == 0 ? string.Empty : string.Join(Environment.NewLine, conflicts);
     }
 
+    public void RefreshTheme()
+    {
+        Background = Brush("WindowBackgroundBrush");
+        Foreground = Brush("StrongTextBrush");
+        if (sidebarPanel is not null)
+        {
+            sidebarPanel.Background = Brush("Surface1Brush");
+            sidebarPanel.BorderBrush = Brush("BorderBrush");
+        }
+
+        Rebuild();
+    }
+
     private UIElement BuildShell()
     {
         var root = new Grid();
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var sidebar = new Border
+        sidebarPanel = new Border
         {
             Background = Brush("Surface1Brush"),
             BorderBrush = Brush("BorderBrush"),
@@ -111,7 +132,7 @@ internal sealed class SettingsWindow : Window
             Padding = new Thickness(18, 20, 14, 18),
             Child = navPanel,
         };
-        root.Children.Add(sidebar);
+        root.Children.Add(sidebarPanel);
 
         var main = new Grid { Margin = new Thickness(30, 24, 30, 22) };
         main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -120,10 +141,19 @@ internal sealed class SettingsWindow : Window
         Grid.SetColumn(main, 1);
         root.Children.Add(main);
 
+        var header = new Grid { Margin = new Thickness(0, 0, 0, 20) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
         pageTitle.FontSize = 28;
         pageTitle.FontWeight = FontWeights.SemiBold;
-        pageTitle.Margin = new Thickness(0, 0, 0, 20);
-        main.Children.Add(pageTitle);
+        pageTitle.VerticalAlignment = VerticalAlignment.Center;
+        header.Children.Add(pageTitle);
+
+        themeButton = CreateThemeButton();
+        Grid.SetColumn(themeButton, 1);
+        header.Children.Add(themeButton);
+        main.Children.Add(header);
 
         var scroll = new ScrollViewer
         {
@@ -164,6 +194,7 @@ internal sealed class SettingsWindow : Window
                 Text = "Codex",
                 FontSize = 22,
                 FontWeight = FontWeights.SemiBold,
+                Foreground = Brush("StrongTextBrush"),
                 Margin = new Thickness(4, 0, 0, 22),
             });
 
@@ -175,6 +206,8 @@ internal sealed class SettingsWindow : Window
             AddNav(SettingsPage.Advanced, localizer["Advanced"]);
 
             pageTitle.Text = PageName(page);
+            pageTitle.Foreground = Brush("StrongTextBrush");
+            UpdateThemeButton();
             contentHost.Children.Clear();
             contentHost.Children.Add(page switch
             {
@@ -214,6 +247,79 @@ internal sealed class SettingsWindow : Window
             Rebuild();
         };
         navPanel.Children.Add(button);
+    }
+
+    private Button CreateThemeButton()
+    {
+        var button = new Button
+        {
+            Width = 44,
+            Height = 40,
+            MinWidth = 44,
+            Padding = new Thickness(0),
+            Background = Brush("Surface2Brush"),
+            BorderBrush = Brush("BorderBrush"),
+        };
+        button.Click += (_, _) =>
+        {
+            CommitFocusedNumber();
+            settings.Theme = settings.Theme == AppTheme.Dark ? AppTheme.Light : AppTheme.Dark;
+            Save();
+        };
+        return button;
+    }
+
+    private void UpdateThemeButton()
+    {
+        if (themeButton is null)
+        {
+            return;
+        }
+
+        bool light = settings.Theme == AppTheme.Light;
+        themeButton.ToolTip = light ? localizer["SwitchToDarkTheme"] : localizer["SwitchToLightTheme"];
+        themeButton.Content = CreateThemeIcon(light);
+        themeButton.Background = Brush(light ? "TabActiveBrush" : "Surface2Brush");
+        themeButton.BorderBrush = Brush(light ? "AccentBrush" : "BorderBrush");
+    }
+
+    private UIElement CreateThemeIcon(bool light)
+    {
+        var grid = new Grid { Width = 22, Height = 22 };
+        if (light)
+        {
+            grid.Children.Add(new System.Windows.Shapes.Ellipse
+            {
+                Width = 10,
+                Height = 10,
+                Stroke = Brush("AccentBrush"),
+                StrokeThickness = 2,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            grid.Children.Add(new System.Windows.Shapes.Path
+            {
+                Data = Geometry.Parse("M 11 0 L 11 4 M 11 18 L 11 22 M 0 11 L 4 11 M 18 11 L 22 11 M 3.2 3.2 L 6 6 M 16 16 L 18.8 18.8 M 18.8 3.2 L 16 6 M 6 16 L 3.2 18.8"),
+                Stroke = Brush("AccentBrush"),
+                StrokeThickness = 1.7,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                Stretch = Stretch.None,
+            });
+            return grid;
+        }
+
+        grid.Children.Add(new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse("M 17 15.7 C 12.4 16.8 8.2 13.4 8.2 8.7 C 8.2 6.4 9.3 4.3 11.1 3 C 6.3 3.4 2.8 7.3 2.8 11.9 C 2.8 16.8 6.8 20.8 11.7 20.8 C 14.2 20.8 16.4 19.8 18 18.1 C 17.5 17.4 17.2 16.6 17 15.7 Z"),
+            Fill = Brush("AccentBrush"),
+            Stretch = Stretch.Uniform,
+            Width = 20,
+            Height = 20,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        return grid;
     }
 
     private UIElement BuildGeneralPage()
@@ -310,15 +416,15 @@ internal sealed class SettingsWindow : Window
             NumberInput(localizer["GracefulTimeout"], localizer["GracefulTimeoutHelp"], settings.GracefulCloseTimeoutSeconds, value => settings.GracefulCloseTimeoutSeconds = (int)value, 1, 1, 60),
             SettingCheck(localizer["ForceCloseFallback"], localizer["ForceCloseFallbackHelp"], settings.ForceCloseFallback, value => settings.ForceCloseFallback = value),
             SettingCheck(localizer["ConfirmForceClose"], localizer["ConfirmForceCloseHelp"], settings.ConfirmBeforeForceClose, value => settings.ConfirmBeforeForceClose = value)));
-        stack.Children.Add(Card(CommandRow(
-            (localizer["OpenApplicationData"], openApplicationDataFolder, false),
-            (localizer["OpenBackups"], openBackupsFolder, false),
-            (localizer["OpenLogs"], openLogsFolder, false),
-            (localizer["ResetPosition"], resetPosition, false),
-            (localizer["ResetSettings"], resetSettings, false),
-            (localizer["ExportSettings"], ExportSettings, false),
-            (localizer["ImportSettings"], ImportSettings, false),
-            (localizer["ExitApplication"], exitApplication, false))));
+        stack.Children.Add(Card(CommandGrid(
+            (localizer["OpenApplicationData"], "M 3 6 L 9 6 L 11 8 L 21 8 L 21 18 L 3 18 Z", openApplicationDataFolder),
+            (localizer["OpenBackups"], "M 4 6 L 20 6 L 20 18 L 4 18 Z M 8 10 L 16 10 M 8 14 L 13 14", openBackupsFolder),
+            (localizer["OpenLogs"], "M 6 3 L 16 3 L 20 7 L 20 21 L 6 21 Z M 15 3 L 15 8 L 20 8 M 9 12 L 17 12 M 9 16 L 17 16", openLogsFolder),
+            (localizer["ResetPosition"], "M 12 4 L 12 20 M 4 12 L 20 12 M 7 7 L 4 12 L 7 17 M 17 7 L 20 12 L 17 17", resetPosition),
+            (localizer["ResetSettings"], "M 6 8 C 7.5 5.5 10.2 4 13 4 C 17.4 4 21 7.6 21 12 C 21 16.4 17.4 20 13 20 C 9.9 20 7.2 18.2 5.9 15.6 M 6 8 L 6 4 M 6 8 L 10 8", resetSettings),
+            (localizer["ExportSettings"], "M 12 4 L 12 15 M 8 11 L 12 15 L 16 11 M 5 19 L 19 19", ExportSettings),
+            (localizer["ImportSettings"], "M 12 15 L 12 4 M 8 8 L 12 4 L 16 8 M 5 19 L 19 19", ImportSettings),
+            (localizer["ExitApplication"], "M 10 5 L 5 5 L 5 19 L 10 19 M 13 8 L 17 12 L 13 16 M 8 12 L 17 12", exitApplication))));
         return stack;
     }
 
@@ -356,30 +462,40 @@ internal sealed class SettingsWindow : Window
 
     private UIElement NumberInput(string title, string subtitle, double value, Action<double> setter, double dragStep = 1, double minimum = double.NegativeInfinity, double maximum = double.PositiveInfinity)
     {
+        double currentValue = SanitizeNumber(value, minimum, maximum);
         var box = new TextBox
         {
-            Text = value.ToString("0.##", CultureInfo.InvariantCulture),
+            Text = currentValue.ToString("0.##", CultureInfo.InvariantCulture),
             MinWidth = 150,
             HorizontalContentAlignment = HorizontalAlignment.Right,
             Cursor = Cursors.SizeWE,
         };
+        void Commit() => CommitNumber(box, currentValue, committed =>
+        {
+            currentValue = committed;
+            setter(committed);
+        }, minimum, maximum);
+
+        box.Tag = (Action)Commit;
         Point dragStart = default;
-        double dragStartValue = value;
+        double dragStartValue = currentValue;
         bool dragging = false;
-        box.LostFocus += (_, _) => CommitNumber(box, value, setter, minimum, maximum);
+        box.LostFocus += (_, _) => Commit();
         box.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Enter)
             {
-                CommitNumber(box, value, setter, minimum, maximum);
+                Commit();
+                Keyboard.ClearFocus();
                 e.Handled = true;
             }
         };
         box.PreviewMouseLeftButtonDown += (_, e) =>
         {
             dragStart = e.GetPosition(this);
-            dragStartValue = TryParseFinite(box.Text, out double parsed) ? parsed : SanitizeNumber(value, minimum, maximum);
+            dragStartValue = TryParseFinite(box.Text, out double parsed) ? parsed : currentValue;
             dragging = false;
+            box.CaptureMouse();
         };
         box.PreviewMouseMove += (_, e) =>
         {
@@ -397,6 +513,7 @@ internal sealed class SettingsWindow : Window
 
             dragging = true;
             double next = SanitizeNumber(dragStartValue + (delta * dragStep), minimum, maximum);
+            currentValue = next;
             setter(next);
             box.Text = (dragStep < 1 ? next : Math.Round(next)).ToString("0.##", CultureInfo.InvariantCulture);
             box.CaretIndex = box.Text.Length;
@@ -404,13 +521,18 @@ internal sealed class SettingsWindow : Window
         };
         box.PreviewMouseLeftButtonUp += (_, e) =>
         {
+            if (box.IsMouseCaptured)
+            {
+                box.ReleaseMouseCapture();
+            }
+
             if (!dragging)
             {
                 return;
             }
 
             dragging = false;
-            CommitNumber(box, value, setter, minimum, maximum);
+            Commit();
             e.Handled = true;
         };
         return SettingRow(title, subtitle, box);
@@ -494,6 +616,62 @@ internal sealed class SettingsWindow : Window
         return SettingRow(title, localizer["HotkeyHelp"], button);
     }
 
+    private void OnPreviewMouseDownCommitNumber(object sender, MouseButtonEventArgs e)
+    {
+        if (Keyboard.FocusedElement is not TextBox box || box.Tag is not Action)
+        {
+            return;
+        }
+
+        if (e.OriginalSource is DependencyObject target && IsSelfOrDescendant(box, target))
+        {
+            return;
+        }
+
+        CommitFocusedNumber();
+    }
+
+    private static void CommitFocusedNumber()
+    {
+        if (Keyboard.FocusedElement is TextBox { Tag: Action commit })
+        {
+            commit();
+        }
+    }
+
+    private static bool IsSelfOrDescendant(DependencyObject parent, DependencyObject child)
+    {
+        DependencyObject? current = child;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, parent))
+            {
+                return true;
+            }
+
+            current = GetParent(current);
+        }
+
+        return false;
+    }
+
+    private static DependencyObject? GetParent(DependencyObject current)
+    {
+        if (current is FrameworkElement element && element.Parent is not null)
+        {
+            return element.Parent;
+        }
+
+        if (current is FrameworkContentElement contentElement && contentElement.Parent is not null)
+        {
+            return contentElement.Parent;
+        }
+
+        return current is Visual or System.Windows.Media.Media3D.Visual3D
+            ? VisualTreeHelper.GetParent(current)
+            : null;
+    }
+
     private void CommitNumber(TextBox box, double previousValue, Action<double> setter, double minimum, double maximum)
     {
         if (!TryParseFinite(box.Text, out double parsed))
@@ -542,6 +720,70 @@ internal sealed class SettingsWindow : Window
                 button.Style = (Style)FindResource("PrimaryButtonStyle");
             }
 
+            button.Click += (_, _) => action();
+            panel.Children.Add(button);
+        }
+
+        return panel;
+    }
+
+    private UIElement CommandGrid(params (string Label, string Icon, Action Action)[] actions)
+    {
+        var panel = new UniformGrid
+        {
+            Columns = 2,
+            Margin = new Thickness(0, -4, 0, -4),
+        };
+
+        foreach ((string label, string icon, Action action) in actions)
+        {
+            var content = new Grid();
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var iconHost = new Border
+            {
+                Width = 34,
+                Height = 34,
+                CornerRadius = new CornerRadius(7),
+                Background = Brush("TabActiveBrush"),
+                Margin = new Thickness(0, 0, 12, 0),
+                Child = new System.Windows.Shapes.Path
+                {
+                    Data = Geometry.Parse(icon),
+                    Stroke = Brush("AccentBrush"),
+                    StrokeThickness = 1.8,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    Stretch = Stretch.Uniform,
+                    Width = 20,
+                    Height = 20,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+            content.Children.Add(iconHost);
+
+            var text = new TextBlock
+            {
+                Text = label,
+                Foreground = Brush("StrongTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 14.5,
+            };
+            Grid.SetColumn(text, 1);
+            content.Children.Add(text);
+
+            var button = new Button
+            {
+                Content = content,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(12, 10, 14, 10),
+                MinHeight = 58,
+                Margin = new Thickness(0, 4, 10, 6),
+            };
             button.Click += (_, _) => action();
             panel.Children.Add(button);
         }

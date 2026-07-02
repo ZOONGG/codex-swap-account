@@ -52,6 +52,7 @@ internal sealed class OverlayController : IDisposable
         this.startupRegistrationService = startupRegistrationService;
         this.logger = logger;
         settings = settingsService.Load();
+        App.ApplyTheme(settings.Theme);
         localizer = new Localizer(settings.Language);
         visibilityState.AutomaticDisplayEnabled = settings.ShowAutomaticallyWhenCodexOpens;
         windowFinder = new CodexWindowFinder(logger);
@@ -530,7 +531,9 @@ internal sealed class OverlayController : IDisposable
     private void ApplySettings()
     {
         ApplyStartupSetting();
+        App.ApplyTheme(settings.Theme);
         overlayWindow?.ApplySettings();
+        settingsWindow?.RefreshTheme();
         trayIcon?.UpdateStartWithWindows(settings.StartWithWindows);
         _ = RegisterHotkeys();
     }
@@ -569,8 +572,8 @@ internal sealed class OverlayController : IDisposable
     private void ResetPosition()
     {
         settings.PositionPreset = PositionPreset.AfterMenu;
-        settings.OffsetX = 376;
-        settings.OffsetY = 6;
+        settings.OffsetX = 396;
+        settings.OffsetY = 2;
         SaveSettings(settings);
     }
 

@@ -64,6 +64,7 @@ public sealed class SettingsServiceTests
         Assert.Equal(OverlayDisplayMode.Expanded, loaded.DisplayMode);
         Assert.Equal(PositionPreset.TopCenter, loaded.PositionPreset);
         Assert.Equal(LanguagePreference.SystemDefault, loaded.Language);
+        Assert.Equal(AppTheme.Dark, loaded.Theme);
         Assert.Equal(1000, loaded.SettingsWindowWidth);
         Assert.Equal(720, loaded.SettingsWindowHeight);
         Assert.NotNull(loaded.Hotkeys);
@@ -91,7 +92,7 @@ public sealed class SettingsServiceTests
     }
 
     [Fact]
-    public void SaveAndLoad_RoundTripsLanguageAndWindowGeometry()
+    public void SaveAndLoad_RoundTripsLanguageThemeAndWindowGeometry()
     {
         using var temp = new TempDirectory();
         var service = new SettingsService(Path.Combine(temp.Path, "settings.json"));
@@ -99,6 +100,7 @@ public sealed class SettingsServiceTests
         service.Save(new OverlaySettings
         {
             Language = LanguagePreference.Russian,
+            Theme = AppTheme.Light,
             SettingsWindowLeft = 120,
             SettingsWindowTop = 80,
             SettingsWindowWidth = 1120,
@@ -108,6 +110,7 @@ public sealed class SettingsServiceTests
         var loaded = service.Load();
 
         Assert.Equal(LanguagePreference.Russian, loaded.Language);
+        Assert.Equal(AppTheme.Light, loaded.Theme);
         Assert.Equal(120, loaded.SettingsWindowLeft);
         Assert.Equal(80, loaded.SettingsWindowTop);
         Assert.Equal(1120, loaded.SettingsWindowWidth);
@@ -134,8 +137,8 @@ public sealed class SettingsServiceTests
 
         var loaded = service.Load();
 
-        Assert.Equal(376, loaded.OffsetX);
-        Assert.Equal(6, loaded.OffsetY);
+        Assert.Equal(396, loaded.OffsetX);
+        Assert.Equal(2, loaded.OffsetY);
         Assert.Equal(1, loaded.Scale);
         Assert.Equal(60, loaded.GracefulCloseTimeoutSeconds);
         Assert.Equal(-1, loaded.SettingsWindowLeft);

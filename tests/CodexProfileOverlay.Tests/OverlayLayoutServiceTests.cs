@@ -43,10 +43,10 @@ public sealed class OverlayLayoutServiceTests
     {
         var service = new OverlayLayoutService();
 
-        OverlayPlacement placement = service.CalculatePlacement(PositionPreset.AfterMenu, 1200, 800, 560, 50, 376, 6);
+        OverlayPlacement placement = service.CalculatePlacement(PositionPreset.AfterMenu, 1200, 800, 560, 50, 396, 2);
 
-        Assert.Equal(376, placement.OffsetX);
-        Assert.Equal(6, placement.OffsetY);
+        Assert.Equal(396, placement.OffsetX);
+        Assert.Equal(2, placement.OffsetY);
     }
 
     [Fact]
@@ -54,10 +54,10 @@ public sealed class OverlayLayoutServiceTests
     {
         var service = new OverlayLayoutService();
 
-        OverlayPlacement placement = service.CalculatePlacement(PositionPreset.AfterMenu, 420, 120, 286, 50, 376, 6);
+        OverlayPlacement placement = service.CalculatePlacement(PositionPreset.AfterMenu, 420, 120, 286, 50, 396, 2);
 
         Assert.Equal(134, placement.OffsetX);
-        Assert.Equal(6, placement.OffsetY);
+        Assert.Equal(2, placement.OffsetY);
     }
 
     [Fact]

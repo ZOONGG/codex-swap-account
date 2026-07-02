@@ -199,12 +199,12 @@ internal sealed class OverlayWindow : Window
     private void RebuildContent()
     {
         Width = LogicalWidth * SanitizedScale;
-        shell.Height = currentMode == OverlayDisplayMode.Compact ? 50 : 50;
+        shell.Height = currentMode == OverlayDisplayMode.Compact ? 42 : 42;
         shell.Background = FindBrush("OverlayBackgroundBrush");
         shell.BorderBrush = FindBrush("OverlayBorderBrush");
         shell.BorderThickness = new Thickness(1);
         shell.CornerRadius = new CornerRadius(8);
-        shell.Padding = currentMode == OverlayDisplayMode.Compact ? new Thickness(8, 6, 8, 6) : new Thickness(7);
+        shell.Padding = currentMode == OverlayDisplayMode.Compact ? new Thickness(6, 5, 6, 5) : new Thickness(5);
         shell.Child = currentMode == OverlayDisplayMode.Compact ? BuildCompactContent() : BuildExpandedContent();
         compactPopup.Child = BuildCompactPopup();
     }
@@ -221,6 +221,7 @@ internal sealed class OverlayWindow : Window
             Cursor = Cursors.Hand,
             IsEnabled = !isSwitching,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            MinHeight = 0,
         };
         button.Click += (_, _) =>
         {
@@ -299,10 +300,11 @@ internal sealed class OverlayWindow : Window
 
         var scrollViewer = new ScrollViewer
         {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
             CanContentScroll = true,
             Content = panel,
+            Height = 32,
         };
         Grid.SetColumn(scrollViewer, 0);
 
@@ -351,12 +353,17 @@ internal sealed class OverlayWindow : Window
 
     private Button CreateProfileButton(ProfileInfo profile, bool isActive)
     {
+        var avatar = CreateAvatar(profile.Initials, profile.Accent, 22);
+        avatar.BorderThickness = isActive ? new Thickness(1) : new Thickness(0);
+        avatar.BorderBrush = isActive ? FindBrush("StrongTextBrush") : Brushes.Transparent;
+
         var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        row.Children.Add(CreateAvatar(profile.Initials, profile.Accent, 24));
+        row.Children.Add(avatar);
         row.Children.Add(new TextBlock
         {
             Text = profile.DisplayName,
-            FontSize = 14.5,
+            FontSize = 13.5,
+            FontWeight = isActive ? FontWeights.SemiBold : FontWeights.Normal,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Foreground = isActive ? FindBrush("StrongTextBrush") : FindBrush("MutedTextBrush"),
             VerticalAlignment = VerticalAlignment.Center,
@@ -372,10 +379,10 @@ internal sealed class OverlayWindow : Window
             content.Children.Add(new Border
             {
                 Width = 3,
-                Height = 22,
+                Height = 20,
                 Background = FindBrush("AccentBrush"),
                 CornerRadius = new CornerRadius(2),
-                Margin = new Thickness(0, 0, 8, 0),
+                Margin = new Thickness(0, 0, 7, 0),
                 VerticalAlignment = VerticalAlignment.Center,
             });
             Grid.SetColumn(row, 1);
@@ -388,11 +395,12 @@ internal sealed class OverlayWindow : Window
             Content = content,
             MinWidth = 108,
             MaxWidth = 176,
-            Height = 38,
-            Margin = new Thickness(0, 0, 4, 0),
-            Padding = isActive ? new Thickness(8, 0, 10, 0) : new Thickness(9, 0, 9, 0),
+            Height = 32,
+            MinHeight = 0,
+            Margin = new Thickness(0, 0, 6, 0),
+            Padding = isActive ? new Thickness(7, 0, 10, 0) : new Thickness(9, 0, 9, 0),
             BorderThickness = isActive ? new Thickness(1) : new Thickness(0),
-            BorderBrush = isActive ? FindBrush("AccentBrush") : Brushes.Transparent,
+            BorderBrush = isActive ? FindBrush("AccentHoverBrush") : Brushes.Transparent,
             Background = isActive ? FindBrush("TabActiveBrush") : FindBrush("TabBackgroundBrush"),
             Cursor = isActive ? Cursors.Arrow : Cursors.Hand,
             Tag = profile.Name,
@@ -414,40 +422,29 @@ internal sealed class OverlayWindow : Window
 
     private Button CreateMenuButton()
     {
-        var plus = new Grid
+        var plus = new System.Windows.Shapes.Path
         {
-            Width = 18,
-            Height = 18,
+            Data = Geometry.Parse("M 8 2 L 8 14 M 2 8 L 14 8"),
+            Stroke = FindBrush("StrongTextBrush"),
+            StrokeThickness = 2.2,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            Width = 16,
+            Height = 16,
+            Stretch = Stretch.None,
             SnapsToDevicePixels = true,
         };
-        plus.Children.Add(new Border
-        {
-            Width = 14,
-            Height = 2,
-            CornerRadius = new CornerRadius(1),
-            Background = FindBrush("StrongTextBrush"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        plus.Children.Add(new Border
-        {
-            Width = 2,
-            Height = 14,
-            CornerRadius = new CornerRadius(1),
-            Background = FindBrush("StrongTextBrush"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
 
         var button = new Button
         {
             Content = plus,
-            Width = 40,
-            Height = 38,
+            Width = 34,
+            Height = 32,
+            MinHeight = 0,
             BorderThickness = new Thickness(0),
             Background = FindBrush("TabBackgroundBrush"),
             Cursor = Cursors.Hand,
-            Margin = new Thickness(8, 0, 0, 0),
+            Margin = new Thickness(4, 0, 0, 0),
             ToolTip = Localizer?["AddProfile"] ?? "Add profile",
         };
 
@@ -522,6 +519,7 @@ internal sealed class OverlayWindow : Window
         {
             Content = grid,
             Height = 38,
+            MinHeight = 0,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = FindBrush("Surface2Brush"),
             BorderThickness = new Thickness(0),

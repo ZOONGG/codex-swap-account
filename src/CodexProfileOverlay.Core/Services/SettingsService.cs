@@ -67,8 +67,8 @@ public sealed class SettingsService
     private static OverlaySettings Normalize(OverlaySettings? settings)
     {
         settings ??= new OverlaySettings();
-        settings.OffsetX = ClampFinite(settings.OffsetX, 0, 4000, 376);
-        settings.OffsetY = ClampFinite(settings.OffsetY, 0, 4000, 6);
+        settings.OffsetX = ClampFinite(settings.OffsetX, 0, 4000, 396);
+        settings.OffsetY = ClampFinite(settings.OffsetY, 0, 4000, 2);
         settings.Scale = ClampFinite(settings.Scale, 0.8, 1.4, 1);
         settings.GracefulCloseTimeoutSeconds = Math.Clamp(settings.GracefulCloseTimeoutSeconds, 1, 60);
         settings.SettingsWindowWidth = ClampFinite(settings.SettingsWindowWidth, 900, 1800, 1000);

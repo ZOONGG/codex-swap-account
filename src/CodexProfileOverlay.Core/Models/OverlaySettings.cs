@@ -6,9 +6,9 @@ public sealed class OverlaySettings
 
     public PositionPreset PositionPreset { get; set; } = PositionPreset.AfterMenu;
 
-    public double OffsetX { get; set; } = 376;
+    public double OffsetX { get; set; } = 396;
 
-    public double OffsetY { get; set; } = 6;
+    public double OffsetY { get; set; } = 2;
 
     public double Scale { get; set; } = 1;
 
@@ -31,6 +31,8 @@ public sealed class OverlaySettings
     public HotkeySettings Hotkeys { get; set; } = HotkeySettings.CreateDefault();
 
     public LanguagePreference Language { get; set; } = LanguagePreference.SystemDefault;
+
+    public AppTheme Theme { get; set; } = AppTheme.Dark;
 
     public double SettingsWindowLeft { get; set; } = -1;
 

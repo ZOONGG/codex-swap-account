@@ -1,6 +1,8 @@
 using System.IO;
 using System.Threading;
 using System.Windows;
+using System.Windows.Media;
+using CodexProfileOverlay.Core.Models;
 using CodexProfileOverlay.Core.Services;
 using Application = System.Windows.Application;
 
@@ -8,12 +10,70 @@ namespace CodexProfileOverlay;
 
 public partial class App : Application
 {
+    private static readonly IReadOnlyDictionary<string, string> DarkTheme = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["WindowBackgroundBrush"] = "#0B0B0D",
+        ["Surface1Brush"] = "#141417",
+        ["Surface2Brush"] = "#1B1B20",
+        ["HoverSurfaceBrush"] = "#24242B",
+        ["PressedSurfaceBrush"] = "#2B2B34",
+        ["BorderBrush"] = "#303038",
+        ["StrongTextBrush"] = "#F3F3F5",
+        ["MutedTextBrush"] = "#A7A7B0",
+        ["DisabledTextBrush"] = "#686872",
+        ["AccentBrush"] = "#8B5CF6",
+        ["AccentHoverBrush"] = "#9D72FF",
+        ["SuccessBrush"] = "#2DD4A3",
+        ["ErrorBrush"] = "#F05D6C",
+        ["InputBackgroundBrush"] = "#101014",
+        ["OverlayBackgroundBrush"] = "#141417",
+        ["OverlayBorderBrush"] = "#303038",
+        ["TabBackgroundBrush"] = "#1B1B20",
+        ["TabHoverBrush"] = "#24242B",
+        ["TabActiveBrush"] = "#2B2440",
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> LightTheme = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["WindowBackgroundBrush"] = "#F5F6FA",
+        ["Surface1Brush"] = "#FFFFFF",
+        ["Surface2Brush"] = "#F0F2F7",
+        ["HoverSurfaceBrush"] = "#E7EAF2",
+        ["PressedSurfaceBrush"] = "#DDE2EC",
+        ["BorderBrush"] = "#CDD3DF",
+        ["StrongTextBrush"] = "#161922",
+        ["MutedTextBrush"] = "#5D6575",
+        ["DisabledTextBrush"] = "#9AA1AE",
+        ["AccentBrush"] = "#6D4AFF",
+        ["AccentHoverBrush"] = "#7E61FF",
+        ["SuccessBrush"] = "#0F9F75",
+        ["ErrorBrush"] = "#D8435D",
+        ["InputBackgroundBrush"] = "#FFFFFF",
+        ["OverlayBackgroundBrush"] = "#FFFFFF",
+        ["OverlayBorderBrush"] = "#C8CEDA",
+        ["TabBackgroundBrush"] = "#EEF1F7",
+        ["TabHoverBrush"] = "#E2E6EF",
+        ["TabActiveBrush"] = "#E8E1FF",
+    };
+
     private Mutex? mutex;
     private EventWaitHandle? activationEvent;
     private Thread? activationThread;
     private OverlayController? controller;
     private SafeLogger? logger;
     private volatile bool exiting;
+
+    public static void ApplyTheme(AppTheme theme)
+    {
+        IReadOnlyDictionary<string, string> palette = theme == AppTheme.Light ? LightTheme : DarkTheme;
+        foreach ((string key, string value) in palette)
+        {
+            if (Current.Resources[key] is SolidColorBrush brush && ColorConverter.ConvertFromString(value) is Color color)
+            {
+                brush.Color = color;
+            }
+        }
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {

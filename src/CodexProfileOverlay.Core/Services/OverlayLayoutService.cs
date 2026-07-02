@@ -6,8 +6,8 @@ public sealed class OverlayLayoutService
 {
     private const double CompactThreshold = 760;
     private const double ExpandedThreshold = 840;
-    private const double AfterMenuX = 376;
-    private const double AfterMenuY = 6;
+    private const double AfterMenuX = 396;
+    private const double AfterMenuY = 2;
 
     public OverlayDisplayMode ResolveDisplayMode(OverlayDisplayMode configuredMode, double clientWidth, OverlayDisplayMode previousAutoMode)
     {
