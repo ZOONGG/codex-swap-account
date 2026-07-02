@@ -15,6 +15,7 @@ internal static class NativeMethods
     public const uint SwpNoMove = 0x0002;
     public const uint SwpNoActivate = 0x0010;
     public const uint SwpShowWindow = 0x0040;
+    public const int SwRestore = 9;
     public const int DwmwaCloaked = 14;
     public const int WmHotkey = 0x0312;
     public const int ModAlt = 0x0001;
@@ -73,6 +74,10 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 using CodexProfileOverlay.Core.Models;
+using CodexProfileOverlay.Core.Services;
 
 namespace CodexProfileOverlay;
 
@@ -8,14 +9,18 @@ internal sealed class TrayIconService : IDisposable
 {
     private readonly NotifyIcon notifyIcon;
     private readonly ContextMenuStrip menu = new();
+    private readonly Localizer localizer;
+    private readonly TrayClickCoordinator clickCoordinator = new();
+    private readonly System.Windows.Forms.Timer singleClickTimer = new() { Interval = 60 };
     private IReadOnlyList<ProfileInfo> profiles = [];
     private string? activeProfile;
     private bool overlayVisible;
     private bool startWithWindows;
     private bool disposed;
 
-    public TrayIconService()
+    public TrayIconService(Localizer localizer)
     {
+        this.localizer = localizer;
         notifyIcon = new NotifyIcon
         {
             Icon = CreateIcon(),
@@ -25,6 +30,14 @@ internal sealed class TrayIconService : IDisposable
         };
         notifyIcon.MouseClick += OnMouseClick;
         notifyIcon.MouseDoubleClick += OnMouseDoubleClick;
+        singleClickTimer.Tick += (_, _) =>
+        {
+            if (clickCoordinator.TryConsumeDueSingleClick(DateTimeOffset.UtcNow))
+            {
+                ToggleOverlayRequested?.Invoke();
+            }
+        };
+        localizer.LanguageChanged += RebuildMenu;
         RebuildMenu();
     }
 
@@ -42,6 +55,11 @@ internal sealed class TrayIconService : IDisposable
 
     public void UpdateProfiles(IReadOnlyList<ProfileInfo> newProfiles, string? newActiveProfile)
     {
+        if (ReferenceEquals(profiles, newProfiles) && string.Equals(activeProfile, newActiveProfile, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         profiles = newProfiles;
         activeProfile = newActiveProfile;
         RebuildMenu();
@@ -49,12 +67,22 @@ internal sealed class TrayIconService : IDisposable
 
     public void UpdateOverlayState(bool isVisible)
     {
+        if (overlayVisible == isVisible)
+        {
+            return;
+        }
+
         overlayVisible = isVisible;
         RebuildMenu();
     }
 
     public void UpdateStartWithWindows(bool isEnabled)
     {
+        if (startWithWindows == isEnabled)
+        {
+            return;
+        }
+
         startWithWindows = isEnabled;
         RebuildMenu();
     }
@@ -74,6 +102,9 @@ internal sealed class TrayIconService : IDisposable
         }
 
         disposed = true;
+        localizer.LanguageChanged -= RebuildMenu;
+        singleClickTimer.Stop();
+        singleClickTimer.Dispose();
         notifyIcon.Visible = false;
         notifyIcon.Dispose();
         menu.Dispose();
@@ -83,7 +114,8 @@ internal sealed class TrayIconService : IDisposable
     {
         if (e.Button == MouseButtons.Left)
         {
-            ToggleOverlayRequested?.Invoke();
+            clickCoordinator.RegisterLeftClick(DateTimeOffset.UtcNow);
+            singleClickTimer.Start();
         }
     }
 
@@ -91,6 +123,8 @@ internal sealed class TrayIconService : IDisposable
     {
         if (e.Button == MouseButtons.Left)
         {
+            clickCoordinator.RegisterLeftDoubleClick();
+            singleClickTimer.Stop();
             OpenCodexRequested?.Invoke();
         }
     }
@@ -98,10 +132,10 @@ internal sealed class TrayIconService : IDisposable
     private void RebuildMenu()
     {
         menu.Items.Clear();
-        menu.Items.Add("Open Codex", null, (_, _) => OpenCodexRequested?.Invoke());
-        menu.Items.Add(overlayVisible ? "Hide switcher" : "Show switcher", null, (_, _) => ToggleOverlayRequested?.Invoke());
+        menu.Items.Add(localizer["OpenCodex"], null, (_, _) => OpenCodexRequested?.Invoke());
+        menu.Items.Add(overlayVisible ? localizer["HideSwitcher"] : localizer["ShowSwitcher"], null, (_, _) => ToggleOverlayRequested?.Invoke());
 
-        var profilesMenu = new ToolStripMenuItem("Profiles");
+        var profilesMenu = new ToolStripMenuItem(localizer["Profiles"]);
         foreach (ProfileInfo profile in profiles)
         {
             var item = new ToolStripMenuItem(profile.DisplayName)
@@ -117,12 +151,12 @@ internal sealed class TrayIconService : IDisposable
 
         if (profilesMenu.DropDownItems.Count == 0)
         {
-            profilesMenu.DropDownItems.Add(new ToolStripMenuItem("No ready profiles") { Enabled = false });
+            profilesMenu.DropDownItems.Add(new ToolStripMenuItem(localizer["NoReadyProfiles"]) { Enabled = false });
         }
 
         menu.Items.Add(profilesMenu);
-        menu.Items.Add("Settings", null, (_, _) => SettingsRequested?.Invoke());
-        var startup = new ToolStripMenuItem("Start with Windows")
+        menu.Items.Add(localizer["Settings"], null, (_, _) => SettingsRequested?.Invoke());
+        var startup = new ToolStripMenuItem(localizer["StartWithWindows"])
         {
             Checked = startWithWindows,
             CheckOnClick = true,
@@ -130,7 +164,7 @@ internal sealed class TrayIconService : IDisposable
         startup.CheckedChanged += (_, _) => StartWithWindowsChanged?.Invoke(startup.Checked);
         menu.Items.Add(startup);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) => ExitRequested?.Invoke());
+        menu.Items.Add(localizer["Exit"], null, (_, _) => ExitRequested?.Invoke());
     }
 
     private static Icon CreateIcon()

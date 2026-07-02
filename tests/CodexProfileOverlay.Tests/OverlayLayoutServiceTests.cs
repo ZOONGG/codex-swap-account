@@ -37,4 +37,37 @@ public sealed class OverlayLayoutServiceTests
         Assert.True(placement.OffsetX <= 1200 - 520 - 100);
         Assert.Equal(34, placement.OffsetY);
     }
+
+    [Fact]
+    public void CalculatePlacement_AfterMenuUsesClientRelativeMenuRow()
+    {
+        var service = new OverlayLayoutService();
+
+        OverlayPlacement placement = service.CalculatePlacement(PositionPreset.AfterMenu, 1200, 800, 560, 50, 376, 6);
+
+        Assert.Equal(376, placement.OffsetX);
+        Assert.Equal(6, placement.OffsetY);
+    }
+
+    [Fact]
+    public void CalculatePlacement_AfterMenuClampsInsideClientArea()
+    {
+        var service = new OverlayLayoutService();
+
+        OverlayPlacement placement = service.CalculatePlacement(PositionPreset.AfterMenu, 420, 120, 286, 50, 376, 6);
+
+        Assert.Equal(134, placement.OffsetX);
+        Assert.Equal(6, placement.OffsetY);
+    }
+
+    [Fact]
+    public void CalculatePlacement_ReplacesNonFiniteOffsetsWithSafeValues()
+    {
+        var service = new OverlayLayoutService();
+
+        OverlayPlacement placement = service.CalculatePlacement(PositionPreset.Custom, 420, 120, 286, 50, double.NaN, double.PositiveInfinity);
+
+        Assert.Equal(0, placement.OffsetX);
+        Assert.Equal(0, placement.OffsetY);
+    }
 }

@@ -19,12 +19,14 @@ $forbiddenPaths = @(
 )
 
 $authJsonShape = (('"refresh' + '_token"'), ('"access' + '_token"'), ('"id' + '_token"')) -join '|'
+$windowsUserPath = 'C:\\Users\\' + [regex]::Escape($env:USERNAME) + '\\'
+$macUserPath = '/Users/' + [regex]::Escape($env:USERNAME) + '/'
 $patterns = @(
     @{ Name = 'authorization-header'; Regex = '(?i)authorization\s*:\s*bearer\s+[a-z0-9._~+/=-]{12,}' },
     @{ Name = 'access-token-field'; Regex = '(?i)(access|refresh|id)[_-]?token["''\s:=]+[a-z0-9._~+/=-]{12,}' },
     @{ Name = 'cookie-header'; Regex = '(?i)\bcookie\s*:\s*[^;=]+=' },
     @{ Name = 'private-key'; Regex = '-----BEGIN [A-Z ]*PRIVATE KEY-----' },
-    @{ Name = 'user-specific-path'; Regex = '(?i)C:\\Users\\najde\\|/Users/najde/' },
+    @{ Name = 'user-specific-path'; Regex = "(?i)$windowsUserPath|$macUserPath" },
     @{ Name = 'auth-json-shape'; Regex = "(?i)$authJsonShape" }
 )
 

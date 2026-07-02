@@ -43,4 +43,118 @@ public sealed class SettingsServiceTests
         Assert.Equal(new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Shift, 'K'), loaded.Hotkeys.ToggleOverlay);
         Assert.Equal(new HotkeyGesture(HotkeyModifiers.Alt, '1'), loaded.Hotkeys.ProfileHotkeys[0]);
     }
+
+    [Fact]
+    public void Load_PreviousVersionJsonUsesNewDefaults()
+    {
+        using var temp = new TempDirectory();
+        string settingsFile = Path.Combine(temp.Path, "settings.json");
+        File.WriteAllText(settingsFile, """
+            {
+              "displayMode": "Expanded",
+              "positionPreset": "TopCenter",
+              "offsetX": 42,
+              "offsetY": 12,
+              "scale": 1.1
+            }
+            """);
+
+        var loaded = new SettingsService(settingsFile).Load();
+
+        Assert.Equal(OverlayDisplayMode.Expanded, loaded.DisplayMode);
+        Assert.Equal(PositionPreset.TopCenter, loaded.PositionPreset);
+        Assert.Equal(LanguagePreference.SystemDefault, loaded.Language);
+        Assert.Equal(1000, loaded.SettingsWindowWidth);
+        Assert.Equal(720, loaded.SettingsWindowHeight);
+        Assert.NotNull(loaded.Hotkeys);
+        Assert.NotNull(loaded.Hotkeys.ProfileHotkeys);
+    }
+
+    [Fact]
+    public void Load_NullProfileHotkeysUsesEmptyList()
+    {
+        using var temp = new TempDirectory();
+        string settingsFile = Path.Combine(temp.Path, "settings.json");
+        File.WriteAllText(settingsFile, """
+            {
+              "hotkeys": {
+                "toggleOverlay": null,
+                "profileHotkeys": null
+              }
+            }
+            """);
+
+        var loaded = new SettingsService(settingsFile).Load();
+
+        Assert.NotNull(loaded.Hotkeys.ProfileHotkeys);
+        Assert.Empty(loaded.Hotkeys.ProfileHotkeys);
+    }
+
+    [Fact]
+    public void SaveAndLoad_RoundTripsLanguageAndWindowGeometry()
+    {
+        using var temp = new TempDirectory();
+        var service = new SettingsService(Path.Combine(temp.Path, "settings.json"));
+
+        service.Save(new OverlaySettings
+        {
+            Language = LanguagePreference.Russian,
+            SettingsWindowLeft = 120,
+            SettingsWindowTop = 80,
+            SettingsWindowWidth = 1120,
+            SettingsWindowHeight = 760,
+        });
+
+        var loaded = service.Load();
+
+        Assert.Equal(LanguagePreference.Russian, loaded.Language);
+        Assert.Equal(120, loaded.SettingsWindowLeft);
+        Assert.Equal(80, loaded.SettingsWindowTop);
+        Assert.Equal(1120, loaded.SettingsWindowWidth);
+        Assert.Equal(760, loaded.SettingsWindowHeight);
+    }
+
+    [Fact]
+    public void Save_NormalizesNonFiniteAndOutOfRangeNumbers()
+    {
+        using var temp = new TempDirectory();
+        var service = new SettingsService(Path.Combine(temp.Path, "settings.json"));
+
+        service.Save(new OverlaySettings
+        {
+            OffsetX = double.NaN,
+            OffsetY = double.PositiveInfinity,
+            Scale = double.NaN,
+            GracefulCloseTimeoutSeconds = 500,
+            SettingsWindowLeft = double.NegativeInfinity,
+            SettingsWindowTop = 120,
+            SettingsWindowWidth = double.NaN,
+            SettingsWindowHeight = 9999,
+        });
+
+        var loaded = service.Load();
+
+        Assert.Equal(376, loaded.OffsetX);
+        Assert.Equal(6, loaded.OffsetY);
+        Assert.Equal(1, loaded.Scale);
+        Assert.Equal(60, loaded.GracefulCloseTimeoutSeconds);
+        Assert.Equal(-1, loaded.SettingsWindowLeft);
+        Assert.Equal(120, loaded.SettingsWindowTop);
+        Assert.Equal(1000, loaded.SettingsWindowWidth);
+        Assert.Equal(1400, loaded.SettingsWindowHeight);
+    }
+
+    [Fact]
+    public void Load_CorruptJsonUsesDefaults()
+    {
+        using var temp = new TempDirectory();
+        string settingsFile = Path.Combine(temp.Path, "settings.json");
+        File.WriteAllText(settingsFile, "{ not valid json");
+
+        var loaded = new SettingsService(settingsFile).Load();
+
+        Assert.Equal(1, loaded.Scale);
+        Assert.Equal(1000, loaded.SettingsWindowWidth);
+        Assert.NotNull(loaded.Hotkeys);
+    }
 }

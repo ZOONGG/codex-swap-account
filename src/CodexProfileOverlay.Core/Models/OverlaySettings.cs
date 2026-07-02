@@ -4,11 +4,11 @@ public sealed class OverlaySettings
 {
     public OverlayDisplayMode DisplayMode { get; set; } = OverlayDisplayMode.Auto;
 
-    public PositionPreset PositionPreset { get; set; } = PositionPreset.TopRight;
+    public PositionPreset PositionPreset { get; set; } = PositionPreset.AfterMenu;
 
-    public double OffsetX { get; set; } = 14;
+    public double OffsetX { get; set; } = 376;
 
-    public double OffsetY { get; set; } = 34;
+    public double OffsetY { get; set; } = 6;
 
     public double Scale { get; set; } = 1;
 
@@ -29,4 +29,14 @@ public sealed class OverlaySettings
     public bool ConfirmBeforeForceClose { get; set; } = true;
 
     public HotkeySettings Hotkeys { get; set; } = HotkeySettings.CreateDefault();
+
+    public LanguagePreference Language { get; set; } = LanguagePreference.SystemDefault;
+
+    public double SettingsWindowLeft { get; set; } = -1;
+
+    public double SettingsWindowTop { get; set; } = -1;
+
+    public double SettingsWindowWidth { get; set; } = 1000;
+
+    public double SettingsWindowHeight { get; set; } = 720;
 }

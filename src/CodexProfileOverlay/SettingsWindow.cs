@@ -1,10 +1,12 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using CodexProfileOverlay.Core.Models;
-using CodexProfileOverlay.Core.Services;
+using Button = System.Windows.Controls.Button;
 using Control = System.Windows.Controls.Control;
+using Forms = System.Windows.Forms;
 
 namespace CodexProfileOverlay;
 
@@ -12,13 +14,30 @@ internal sealed class SettingsWindow : Window
 {
     private readonly OverlaySettings settings;
     private readonly Action<OverlaySettings> save;
+    private readonly Action addProfile;
+    private readonly Action manageProfiles;
+    private readonly Action openProfilesFolder;
+    private readonly Action openRemovedProfilesFolder;
+    private readonly Action openApplicationDataFolder;
+    private readonly Action openBackupsFolder;
+    private readonly Action openLogsFolder;
+    private readonly Action resetPosition;
+    private readonly Action resetSettings;
+    private readonly Action exitApplication;
+    private readonly Localizer localizer;
+    private readonly Grid contentHost = new();
+    private readonly TextBlock pageTitle = new();
+    private readonly TextBlock statusText = new();
     private readonly TextBlock conflictText = new();
-    private readonly StackPanel profileHotkeyPanel = new();
+    private readonly StackPanel navPanel = new();
     private IReadOnlyList<ProfileInfo> profiles;
+    private SettingsPage page = SettingsPage.General;
+    private bool isRebuilding;
 
     public SettingsWindow(
         OverlaySettings settings,
         IReadOnlyList<ProfileInfo> profiles,
+        Localizer localizer,
         Action<OverlaySettings> save,
         Action addProfile,
         Action manageProfiles,
@@ -33,81 +52,44 @@ internal sealed class SettingsWindow : Window
     {
         this.settings = settings;
         this.profiles = profiles;
+        this.localizer = localizer;
         this.save = save;
+        this.addProfile = addProfile;
+        this.manageProfiles = manageProfiles;
+        this.openProfilesFolder = openProfilesFolder;
+        this.openRemovedProfilesFolder = openRemovedProfilesFolder;
+        this.openApplicationDataFolder = openApplicationDataFolder;
+        this.openBackupsFolder = openBackupsFolder;
+        this.openLogsFolder = openLogsFolder;
+        this.resetPosition = resetPosition;
+        this.resetSettings = resetSettings;
+        this.exitApplication = exitApplication;
 
-        Title = "Codex Profile Overlay Settings";
-        Width = 720;
-        Height = 760;
-        MinWidth = 620;
-        MinHeight = 560;
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Background = (Brush)Application.Current.FindResource("OverlayBackgroundBrush");
-        Foreground = (Brush)Application.Current.FindResource("StrongTextBrush");
+        Title = "Codex Profile Overlay";
+        MinWidth = 900;
+        MinHeight = 620;
+        Background = Brush("WindowBackgroundBrush");
+        Foreground = Brush("StrongTextBrush");
+        FontSize = 15;
+        UseLayoutRounding = true;
+        SnapsToDevicePixels = true;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        ApplySavedGeometry();
 
-        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        var root = new StackPanel { Margin = new Thickness(18) };
-        scroll.Content = root;
-        Content = scroll;
-
-        root.Children.Add(Section("Appearance"));
-        root.Children.Add(EnumCombo("Display mode", settings.DisplayMode, value => settings.DisplayMode = value));
-        root.Children.Add(EnumCombo("Position preset", settings.PositionPreset, value => settings.PositionPreset = value));
-        root.Children.Add(NumberRow("Custom X offset", settings.OffsetX, value => settings.OffsetX = value));
-        root.Children.Add(NumberRow("Custom Y offset", settings.OffsetY, value => settings.OffsetY = value));
-        root.Children.Add(NumberRow("UI scale", settings.Scale, value => settings.Scale = Math.Clamp(value, 0.8, 1.4)));
-        root.Children.Add(Check("Animations", settings.AnimationsEnabled, value => settings.AnimationsEnabled = value));
-
-        root.Children.Add(Section("Behavior"));
-        root.Children.Add(Check("Start with Windows", settings.StartWithWindows, value => settings.StartWithWindows = value));
-        root.Children.Add(Check("Show automatically when Codex opens", settings.ShowAutomaticallyWhenCodexOpens, value => settings.ShowAutomaticallyWhenCodexOpens = value));
-        root.Children.Add(Check("Launch Codex when the overlay starts", settings.LaunchCodexWhenOverlayStarts, value => settings.LaunchCodexWhenOverlayStarts = value));
-        root.Children.Add(Check("Launch Codex after switching", settings.LaunchCodexAfterSwitching, value => settings.LaunchCodexAfterSwitching = value));
-        root.Children.Add(NumberRow("Graceful-close timeout seconds", settings.GracefulCloseTimeoutSeconds, value => settings.GracefulCloseTimeoutSeconds = (int)Math.Clamp(value, 1, 60)));
-        root.Children.Add(Check("Force-close fallback", settings.ForceCloseFallback, value => settings.ForceCloseFallback = value));
-        root.Children.Add(Check("Confirmation before force closing", settings.ConfirmBeforeForceClose, value => settings.ConfirmBeforeForceClose = value));
-
-        root.Children.Add(Section("Hotkeys"));
-        root.Children.Add(HotkeyRow("Toggle overlay", settings.Hotkeys.ToggleOverlay, value => settings.Hotkeys.ToggleOverlay = value));
-        profileHotkeyPanel.Margin = new Thickness(0, 2, 0, 0);
-        root.Children.Add(profileHotkeyPanel);
-        RebuildProfileHotkeys();
-        root.Children.Add(CommandRow(("Restore defaults", () =>
-        {
-            settings.Hotkeys = HotkeySettings.CreateDefault();
-            RebuildProfileHotkeys();
-            Save();
-        })));
-        conflictText.Foreground = Brushes.IndianRed;
-        conflictText.Margin = new Thickness(0, 4, 0, 0);
-        root.Children.Add(conflictText);
-
-        root.Children.Add(Section("Profiles"));
-        root.Children.Add(CommandRow(
-            ("Add", addProfile),
-            ("Manage", manageProfiles),
-            ("Refresh", () => Close()),
-            ("Open profiles folder", openProfilesFolder),
-            ("Open removed profiles folder", openRemovedProfilesFolder)));
-
-        root.Children.Add(Section("Advanced"));
-        root.Children.Add(CommandRow(
-            ("Open app data", openApplicationDataFolder),
-            ("Open backups", openBackupsFolder),
-            ("Open logs", openLogsFolder)));
-        root.Children.Add(CommandRow(
-            ("Reset position", resetPosition),
-            ("Reset settings", resetSettings),
-            ("Export settings", ExportSettings),
-            ("Import settings", ImportSettings),
-            ("Exit application", exitApplication)));
-
-        Closing += (_, _) => Save();
+        Content = BuildShell();
+        localizer.LanguageChanged += Rebuild;
+        Rebuild();
+        Closing += (_, _) => SaveGeometry();
+        Closed += (_, _) => localizer.LanguageChanged -= Rebuild;
     }
 
     public void UpdateProfiles(IReadOnlyList<ProfileInfo> newProfiles)
     {
         profiles = newProfiles;
-        RebuildProfileHotkeys();
+        if (page == SettingsPage.Hotkeys || page == SettingsPage.Profiles)
+        {
+            Rebuild();
+        }
     }
 
     public void SetConflicts(IReadOnlyList<string> conflicts)
@@ -115,9 +97,176 @@ internal sealed class SettingsWindow : Window
         conflictText.Text = conflicts.Count == 0 ? string.Empty : string.Join(Environment.NewLine, conflicts);
     }
 
-    private void RebuildProfileHotkeys()
+    private UIElement BuildShell()
     {
-        profileHotkeyPanel.Children.Clear();
+        var root = new Grid();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var sidebar = new Border
+        {
+            Background = Brush("Surface1Brush"),
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(0, 0, 1, 0),
+            Padding = new Thickness(18, 20, 14, 18),
+            Child = navPanel,
+        };
+        root.Children.Add(sidebar);
+
+        var main = new Grid { Margin = new Thickness(30, 24, 30, 22) };
+        main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetColumn(main, 1);
+        root.Children.Add(main);
+
+        pageTitle.FontSize = 28;
+        pageTitle.FontWeight = FontWeights.SemiBold;
+        pageTitle.Margin = new Thickness(0, 0, 0, 20);
+        main.Children.Add(pageTitle);
+
+        var scroll = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = contentHost,
+        };
+        Grid.SetRow(scroll, 1);
+        main.Children.Add(scroll);
+
+        var footer = new DockPanel { Margin = new Thickness(0, 18, 0, 0), LastChildFill = false };
+        statusText.Foreground = Brush("SuccessBrush");
+        statusText.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(statusText, Dock.Left);
+        footer.Children.Add(statusText);
+
+        var close = new Button { Content = localizer["Close"], MinWidth = 120 };
+        close.Click += (_, _) => Close();
+        DockPanel.SetDock(close, Dock.Right);
+        footer.Children.Add(close);
+        Grid.SetRow(footer, 2);
+        main.Children.Add(footer);
+        return root;
+    }
+
+    private void Rebuild()
+    {
+        if (isRebuilding)
+        {
+            return;
+        }
+
+        isRebuilding = true;
+        try
+        {
+            navPanel.Children.Clear();
+            navPanel.Children.Add(new TextBlock
+            {
+                Text = "Codex",
+                FontSize = 22,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(4, 0, 0, 22),
+            });
+
+            AddNav(SettingsPage.General, localizer["General"]);
+            AddNav(SettingsPage.Appearance, localizer["Appearance"]);
+            AddNav(SettingsPage.Profiles, localizer["Profiles"]);
+            AddNav(SettingsPage.Hotkeys, localizer["Hotkeys"]);
+            AddNav(SettingsPage.Language, localizer["Language"]);
+            AddNav(SettingsPage.Advanced, localizer["Advanced"]);
+
+            pageTitle.Text = PageName(page);
+            contentHost.Children.Clear();
+            contentHost.Children.Add(page switch
+            {
+                SettingsPage.General => BuildGeneralPage(),
+                SettingsPage.Appearance => BuildAppearancePage(),
+                SettingsPage.Profiles => BuildProfilesPage(),
+                SettingsPage.Hotkeys => BuildHotkeysPage(),
+                SettingsPage.Language => BuildLanguagePage(),
+                SettingsPage.Advanced => BuildAdvancedPage(),
+                _ => BuildGeneralPage(),
+            });
+        }
+        finally
+        {
+            isRebuilding = false;
+        }
+    }
+
+    private void AddNav(SettingsPage target, string label)
+    {
+        var button = new Button
+        {
+            Content = label,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 8),
+            Background = target == page ? Brush("TabActiveBrush") : Brushes.Transparent,
+            BorderBrush = target == page ? Brush("AccentBrush") : Brushes.Transparent,
+        };
+        button.Click += (_, _) =>
+        {
+            if (page == target)
+            {
+                return;
+            }
+
+            page = target;
+            Rebuild();
+        };
+        navPanel.Children.Add(button);
+    }
+
+    private UIElement BuildGeneralPage()
+    {
+        var stack = PageStack();
+        stack.Children.Add(Card(
+            SettingCheck(localizer["StartWithWindows"], localizer["StartWithWindowsHelp"], settings.StartWithWindows, value => settings.StartWithWindows = value),
+            SettingCheck(localizer["ShowAutomatically"], localizer["ShowAutomaticallyHelp"], settings.ShowAutomaticallyWhenCodexOpens, value => settings.ShowAutomaticallyWhenCodexOpens = value),
+            SettingCheck(localizer["LaunchOnStart"], localizer["LaunchOnStartHelp"], settings.LaunchCodexWhenOverlayStarts, value => settings.LaunchCodexWhenOverlayStarts = value),
+            SettingCheck(localizer["LaunchAfterSwitch"], localizer["LaunchAfterSwitchHelp"], settings.LaunchCodexAfterSwitching, value => settings.LaunchCodexAfterSwitching = value)));
+        return stack;
+    }
+
+    private UIElement BuildAppearancePage()
+    {
+        var stack = PageStack();
+        var rows = new List<UIElement>
+        {
+            EnumCombo(localizer["DisplayMode"], localizer["DisplayModeHelp"], settings.DisplayMode, value => settings.DisplayMode = value),
+            EnumCombo(localizer["PositionPreset"], localizer["PositionPresetHelp"], settings.PositionPreset, value => settings.PositionPreset = value, Rebuild),
+        };
+
+        if (settings.PositionPreset == PositionPreset.Custom)
+        {
+            rows.Add(NumberInput(localizer["OffsetX"], localizer["OffsetXHelp"], settings.OffsetX, value => settings.OffsetX = value, 1, 0, 4000));
+            rows.Add(NumberInput(localizer["OffsetY"], localizer["OffsetYHelp"], settings.OffsetY, value => settings.OffsetY = value, 1, 0, 4000));
+        }
+
+        rows.Add(NumberInput(localizer["UiScale"], localizer["UiScaleHelp"], settings.Scale, value => settings.Scale = value, 0.01, 0.8, 1.4));
+        rows.Add(SettingCheck(localizer["Animations"], localizer["AnimationsHelp"], settings.AnimationsEnabled, value => settings.AnimationsEnabled = value));
+        stack.Children.Add(Card(rows.ToArray()));
+        return stack;
+    }
+
+    private UIElement BuildProfilesPage()
+    {
+        var stack = PageStack();
+        stack.Children.Add(Card(CommandRow(
+            (localizer["AddProfile"], addProfile, true),
+            (localizer["ManageProfiles"], manageProfiles, false),
+            (localizer["OpenProfilesFolder"], openProfilesFolder, false),
+            (localizer["OpenRemovedProfilesFolder"], openRemovedProfilesFolder, false))));
+        return stack;
+    }
+
+    private UIElement BuildHotkeysPage()
+    {
+        var stack = PageStack();
+        var rows = new List<UIElement>
+        {
+            HotkeyRow(localizer["ToggleSwitcher"], settings.Hotkeys.ToggleOverlay, value => settings.Hotkeys.ToggleOverlay = value),
+        };
+
         while (settings.Hotkeys.ProfileHotkeys.Count < 9)
         {
             settings.Hotkeys.ProfileHotkeys.Add(null);
@@ -126,79 +275,155 @@ internal sealed class SettingsWindow : Window
         for (int index = 0; index < Math.Min(9, profiles.Count); index++)
         {
             int captured = index;
-            profileHotkeyPanel.Children.Add(HotkeyRow($"Profile {index + 1}: {profiles[index].DisplayName}", settings.Hotkeys.ProfileHotkeys[index], value => settings.Hotkeys.ProfileHotkeys[captured] = value));
+            rows.Add(HotkeyRow(localizer.Format("ProfileHotkey", index + 1, profiles[index].DisplayName), settings.Hotkeys.ProfileHotkeys[index], value => settings.Hotkeys.ProfileHotkeys[captured] = value));
         }
-    }
 
-    private TextBlock Section(string title)
-    {
-        return new TextBlock
+        rows.Add(CommandRow((localizer["ResetHotkeys"], () =>
         {
-            Text = title,
-            FontSize = 16,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 18, 0, 8),
-        };
+            settings.Hotkeys = HotkeySettings.CreateDefault();
+            Save();
+            Rebuild();
+        }, false)));
+
+        conflictText.Foreground = Brush("ErrorBrush");
+        rows.Add(conflictText);
+        stack.Children.Add(Card(rows.ToArray()));
+        return stack;
     }
 
-    private UIElement EnumCombo<T>(string label, T value, Action<T> setter)
+    private UIElement BuildLanguagePage()
+    {
+        var stack = PageStack();
+        stack.Children.Add(Card(EnumCombo(localizer["Language"], localizer["LanguageHelp"], settings.Language, value =>
+        {
+            settings.Language = value;
+            Save();
+            localizer.SetLanguage(value);
+        })));
+        return stack;
+    }
+
+    private UIElement BuildAdvancedPage()
+    {
+        var stack = PageStack();
+        stack.Children.Add(Card(
+            NumberInput(localizer["GracefulTimeout"], localizer["GracefulTimeoutHelp"], settings.GracefulCloseTimeoutSeconds, value => settings.GracefulCloseTimeoutSeconds = (int)value, 1, 1, 60),
+            SettingCheck(localizer["ForceCloseFallback"], localizer["ForceCloseFallbackHelp"], settings.ForceCloseFallback, value => settings.ForceCloseFallback = value),
+            SettingCheck(localizer["ConfirmForceClose"], localizer["ConfirmForceCloseHelp"], settings.ConfirmBeforeForceClose, value => settings.ConfirmBeforeForceClose = value)));
+        stack.Children.Add(Card(CommandRow(
+            (localizer["OpenApplicationData"], openApplicationDataFolder, false),
+            (localizer["OpenBackups"], openBackupsFolder, false),
+            (localizer["OpenLogs"], openLogsFolder, false),
+            (localizer["ResetPosition"], resetPosition, false),
+            (localizer["ResetSettings"], resetSettings, false),
+            (localizer["ExportSettings"], ExportSettings, false),
+            (localizer["ImportSettings"], ImportSettings, false),
+            (localizer["ExitApplication"], exitApplication, false))));
+        return stack;
+    }
+
+    private UIElement SettingCheck(string title, string subtitle, bool value, Action<bool> setter)
+    {
+        var check = new CheckBox { IsChecked = value, HorizontalAlignment = HorizontalAlignment.Left };
+        check.Checked += (_, _) => { setter(true); Save(); };
+        check.Unchecked += (_, _) => { setter(false); Save(); };
+        return SettingRow(title, subtitle, check);
+    }
+
+    private UIElement EnumCombo<T>(string title, string subtitle, T value, Action<T> setter, Action? afterSave = null)
         where T : struct, Enum
     {
+        var options = Enum.GetValues<T>().Select(item => new Option<T>(DisplayEnum(item), item)).ToArray();
         var combo = new ComboBox
         {
-            ItemsSource = Enum.GetValues<T>(),
-            SelectedItem = value,
-            Width = 180,
+            ItemsSource = options,
+            DisplayMemberPath = nameof(Option<T>.Label),
+            SelectedValuePath = nameof(Option<T>.Value),
+            SelectedValue = value,
+            MinWidth = 220,
         };
         combo.SelectionChanged += (_, _) =>
         {
-            if (combo.SelectedItem is T selected)
+            if (combo.SelectedValue is T selected)
             {
                 setter(selected);
                 Save();
+                afterSave?.Invoke();
             }
         };
-        return Labeled(label, combo);
+        return SettingRow(title, subtitle, combo);
     }
 
-    private UIElement NumberRow(string label, double value, Action<double> setter)
+    private UIElement NumberInput(string title, string subtitle, double value, Action<double> setter, double dragStep = 1, double minimum = double.NegativeInfinity, double maximum = double.PositiveInfinity)
     {
-        var box = new TextBox { Text = value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), Width = 100 };
-        box.LostFocus += (_, _) =>
+        var box = new TextBox
         {
-            if (double.TryParse(box.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsed))
+            Text = value.ToString("0.##", CultureInfo.InvariantCulture),
+            MinWidth = 150,
+            HorizontalContentAlignment = HorizontalAlignment.Right,
+            Cursor = Cursors.SizeWE,
+        };
+        Point dragStart = default;
+        double dragStartValue = value;
+        bool dragging = false;
+        box.LostFocus += (_, _) => CommitNumber(box, value, setter, minimum, maximum);
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
             {
-                setter(parsed);
-                Save();
+                CommitNumber(box, value, setter, minimum, maximum);
+                e.Handled = true;
             }
         };
-        return Labeled(label, box);
+        box.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            dragStart = e.GetPosition(this);
+            dragStartValue = TryParseFinite(box.Text, out double parsed) ? parsed : SanitizeNumber(value, minimum, maximum);
+            dragging = false;
+        };
+        box.PreviewMouseMove += (_, e) =>
+        {
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                return;
+            }
+
+            Point current = e.GetPosition(this);
+            double delta = current.X - dragStart.X;
+            if (!dragging && Math.Abs(delta) < 4)
+            {
+                return;
+            }
+
+            dragging = true;
+            double next = SanitizeNumber(dragStartValue + (delta * dragStep), minimum, maximum);
+            setter(next);
+            box.Text = (dragStep < 1 ? next : Math.Round(next)).ToString("0.##", CultureInfo.InvariantCulture);
+            box.CaretIndex = box.Text.Length;
+            e.Handled = true;
+        };
+        box.PreviewMouseLeftButtonUp += (_, e) =>
+        {
+            if (!dragging)
+            {
+                return;
+            }
+
+            dragging = false;
+            CommitNumber(box, value, setter, minimum, maximum);
+            e.Handled = true;
+        };
+        return SettingRow(title, subtitle, box);
     }
 
-    private UIElement Check(string label, bool value, Action<bool> setter)
+    private UIElement HotkeyRow(string title, HotkeyGesture? value, Action<HotkeyGesture?> setter)
     {
-        var check = new CheckBox { Content = label, IsChecked = value, Margin = new Thickness(0, 4, 0, 4) };
-        check.Checked += (_, _) =>
-        {
-            setter(true);
-            Save();
-        };
-        check.Unchecked += (_, _) =>
-        {
-            setter(false);
-            Save();
-        };
-        return check;
-    }
-
-    private UIElement HotkeyRow(string label, HotkeyGesture? value, Action<HotkeyGesture?> setter)
-    {
-        var button = new Button { Content = value?.ToString() ?? "None", MinWidth = 130 };
+        var button = new Button { Content = value?.ToString() ?? localizer["None"], MinWidth = 190 };
         bool recording = false;
         button.Click += (_, _) =>
         {
             recording = true;
-            button.Content = "Press keys...";
+            button.Content = localizer["PressShortcut"];
             button.Focus();
         };
         button.PreviewKeyDown += (_, e) =>
@@ -209,66 +434,235 @@ internal sealed class SettingsWindow : Window
             }
 
             e.Handled = true;
-            if (e.Key == Key.Escape || e.Key == Key.Back)
+            if (e.Key is Key.Escape)
+            {
+                button.Content = value?.ToString() ?? localizer["None"];
+                recording = false;
+                return;
+            }
+
+            if (e.Key is Key.Back or Key.Delete)
             {
                 setter(null);
-                button.Content = "None";
+                button.Content = localizer["None"];
+                recording = false;
+                Save();
+                return;
             }
-            else if (e.Key is not (Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin))
+
+            Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
             {
-                var modifiers = HotkeyModifiers.None;
-                if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
-                {
-                    modifiers |= HotkeyModifiers.Control;
-                }
-
-                if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0)
-                {
-                    modifiers |= HotkeyModifiers.Alt;
-                }
-
-                if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
-                {
-                    modifiers |= HotkeyModifiers.Shift;
-                }
-
-                int virtualKey = KeyInterop.VirtualKeyFromKey(e.Key == Key.System ? e.SystemKey : e.Key);
-                var gesture = new HotkeyGesture(modifiers, virtualKey);
-                setter(gesture);
-                button.Content = gesture.ToString();
+                return;
             }
 
+            var modifiers = HotkeyModifiers.None;
+            if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
+            {
+                modifiers |= HotkeyModifiers.Control;
+            }
+
+            if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0)
+            {
+                modifiers |= HotkeyModifiers.Alt;
+            }
+
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+            {
+                modifiers |= HotkeyModifiers.Shift;
+            }
+
+            if ((Keyboard.Modifiers & ModifierKeys.Windows) != 0)
+            {
+                modifiers |= HotkeyModifiers.Windows;
+            }
+
+            if (modifiers == HotkeyModifiers.None)
+            {
+                conflictText.Text = localizer["UseModifier"];
+                recording = false;
+                button.Content = value?.ToString() ?? localizer["None"];
+                return;
+            }
+
+            var gesture = new HotkeyGesture(modifiers, KeyInterop.VirtualKeyFromKey(key));
+            setter(gesture);
+            button.Content = gesture.ToString();
             recording = false;
             Save();
         };
-        return Labeled(label, button);
+        return SettingRow(title, localizer["HotkeyHelp"], button);
     }
 
-    private UIElement Labeled(string label, Control control)
+    private void CommitNumber(TextBox box, double previousValue, Action<double> setter, double minimum, double maximum)
     {
-        var panel = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
-        panel.Children.Add(new TextBlock
+        if (!TryParseFinite(box.Text, out double parsed))
         {
-            Text = label,
-            Width = 260,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = (Brush)Application.Current.FindResource("MutedTextBrush"),
-        });
-        panel.Children.Add(control);
-        return panel;
+            box.Text = SanitizeNumber(previousValue, minimum, maximum).ToString("0.##", CultureInfo.InvariantCulture);
+            conflictText.Text = localizer["InvalidNumber"];
+            return;
+        }
+
+        parsed = SanitizeNumber(parsed, minimum, maximum);
+        box.Text = parsed.ToString("0.##", CultureInfo.InvariantCulture);
+        setter(parsed);
+        Save();
     }
 
-    private UIElement CommandRow(params (string Label, Action Action)[] actions)
+    private UIElement SettingRow(string title, string subtitle, Control control)
     {
-        var panel = new WrapPanel { Margin = new Thickness(0, 4, 0, 4) };
-        foreach ((string label, Action action) in actions)
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, 18) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var text = new StackPanel { Margin = new Thickness(0, 0, 24, 0) };
+        text.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, Foreground = Brush("StrongTextBrush") });
+        text.Children.Add(new TextBlock { Text = subtitle, FontSize = 13.5, Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap });
+        grid.Children.Add(text);
+
+        control.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(control, 1);
+        grid.Children.Add(control);
+        return grid;
+    }
+
+    private UIElement CommandRow(params (string Label, Action Action, bool Primary)[] actions)
+    {
+        var panel = new WrapPanel();
+        foreach ((string label, Action action, bool primary) in actions)
         {
-            var button = new Button { Content = label, Margin = new Thickness(0, 0, 8, 8), MinWidth = 96, Height = 32 };
+            var button = new Button
+            {
+                Content = label,
+                Margin = new Thickness(0, 0, 10, 10),
+                MinWidth = 132,
+            };
+            if (primary)
+            {
+                button.Style = (Style)FindResource("PrimaryButtonStyle");
+            }
+
             button.Click += (_, _) => action();
             panel.Children.Add(button);
         }
 
         return panel;
+    }
+
+    private StackPanel PageStack() => new() { Margin = new Thickness(0, 0, 12, 0) };
+
+    private Border Card(params UIElement[] children)
+    {
+        var panel = new StackPanel();
+        foreach (UIElement child in children)
+        {
+            panel.Children.Add(child);
+        }
+
+        return new Border
+        {
+            Background = Brush("Surface1Brush"),
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(22),
+            Margin = new Thickness(0, 0, 0, 16),
+            Child = panel,
+        };
+    }
+
+    private string PageName(SettingsPage value) => value switch
+    {
+        SettingsPage.General => localizer["General"],
+        SettingsPage.Appearance => localizer["Appearance"],
+        SettingsPage.Profiles => localizer["Profiles"],
+        SettingsPage.Hotkeys => localizer["Hotkeys"],
+        SettingsPage.Language => localizer["Language"],
+        SettingsPage.Advanced => localizer["Advanced"],
+        _ => localizer["Settings"],
+    };
+
+    private string DisplayEnum<T>(T value)
+        where T : struct, Enum
+    {
+        return value switch
+        {
+            LanguagePreference.SystemDefault => localizer["SystemDefault"],
+            LanguagePreference.English => localizer["English"],
+            LanguagePreference.Russian => localizer["Russian"],
+            PositionPreset.AfterMenu => localizer["AfterMenu"],
+            PositionPreset.TopCenter => localizer["TopCenter"],
+            PositionPreset.TopRight => localizer["TopRight"],
+            PositionPreset.TopLeft => localizer["TopLeft"],
+            PositionPreset.Custom => localizer["Custom"],
+            OverlayDisplayMode.Auto => localizer["Auto"],
+            OverlayDisplayMode.Compact => localizer["Compact"],
+            OverlayDisplayMode.Expanded => localizer["Expanded"],
+            _ => value.ToString(),
+        };
+    }
+
+    private void ApplySavedGeometry()
+    {
+        Width = SanitizeNumber(settings.SettingsWindowWidth, 900, 1800, 1000);
+        Height = SanitizeNumber(settings.SettingsWindowHeight, 620, 1400, 720);
+        if (IsGeometryVisible(settings.SettingsWindowLeft, settings.SettingsWindowTop, Width, Height))
+        {
+            Left = settings.SettingsWindowLeft;
+            Top = settings.SettingsWindowTop;
+        }
+        else
+        {
+            Left = SystemParameters.WorkArea.Left + (SystemParameters.WorkArea.Width - Width) / 2;
+            Top = SystemParameters.WorkArea.Top + (SystemParameters.WorkArea.Height - Height) / 2;
+        }
+    }
+
+    private static bool IsGeometryVisible(double left, double top, double width, double height)
+    {
+        if (!double.IsFinite(left) || !double.IsFinite(top) || !double.IsFinite(width) || !double.IsFinite(height))
+        {
+            return false;
+        }
+
+        if (left == -1 && top == -1)
+        {
+            return false;
+        }
+
+        var windowRect = new System.Drawing.Rectangle(
+            ToInt32Coordinate(left),
+            ToInt32Coordinate(top),
+            Math.Max(1, ToInt32Coordinate(width)),
+            Math.Max(1, ToInt32Coordinate(height)));
+        return Forms.Screen.AllScreens.Any(screen => screen.WorkingArea.IntersectsWith(windowRect));
+    }
+
+    private void SaveGeometry()
+    {
+        if (WindowState == WindowState.Normal)
+        {
+            settings.SettingsWindowLeft = double.IsFinite(Left) ? Left : -1;
+            settings.SettingsWindowTop = double.IsFinite(Top) ? Top : -1;
+            settings.SettingsWindowWidth = SanitizeNumber(Width, 900, 1800, 1000);
+            settings.SettingsWindowHeight = SanitizeNumber(Height, 620, 1400, 720);
+            Save();
+        }
+    }
+
+    private void Save()
+    {
+        try
+        {
+            statusText.Foreground = Brush("SuccessBrush");
+            statusText.Text = localizer["Applied"];
+            save(settings);
+        }
+        catch (Exception)
+        {
+            statusText.Foreground = Brush("ErrorBrush");
+            statusText.Text = localizer["CouldNotSaveSettings"];
+        }
     }
 
     private void ExportSettings()
@@ -292,5 +686,41 @@ internal sealed class SettingsWindow : Window
         }
     }
 
-    private void Save() => save(settings);
+    private SolidColorBrush Brush(string key) => ((SolidColorBrush)Application.Current.FindResource(key)).Clone();
+
+    private static bool TryParseFinite(string text, out double value)
+    {
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+            && double.IsFinite(value);
+    }
+
+    private static double SanitizeNumber(double value, double minimum, double maximum, double fallback = 0)
+    {
+        if (!double.IsFinite(value))
+        {
+            value = fallback;
+        }
+
+        return Math.Clamp(value, minimum, maximum);
+    }
+
+    private static int ToInt32Coordinate(double value)
+    {
+        return (int)Math.Clamp(Math.Round(value), int.MinValue, int.MaxValue);
+    }
+
+    private enum SettingsPage
+    {
+        General,
+        Appearance,
+        Profiles,
+        Hotkeys,
+        Language,
+        Advanced,
+    }
+
+    private sealed record Option<T>(string Label, T Value)
+    {
+        public override string ToString() => Label;
+    }
 }

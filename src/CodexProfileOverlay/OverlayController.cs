@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using CodexProfileOverlay.Core.Models;
 using CodexProfileOverlay.Core.Services;
@@ -19,8 +20,10 @@ internal sealed class OverlayController : IDisposable
     private readonly CodexWindowFinder windowFinder;
     private readonly DispatcherTimer timer;
     private readonly AppPaths paths;
+    private readonly OverlayVisibilityState visibilityState = new();
     private readonly CancellationTokenSource disposalTokenSource = new();
     private OverlaySettings settings;
+    private Localizer localizer;
     private TrayIconService? trayIcon;
     private OverlayWindow? overlayWindow;
     private SettingsWindow? settingsWindow;
@@ -29,7 +32,6 @@ internal sealed class OverlayController : IDisposable
     private IReadOnlyList<ProfileInfo> profiles = [];
     private CodexWindowInfo? attachedWindow;
     private bool switching;
-    private bool manualHidden;
 
     public OverlayController(
         AppPaths paths,
@@ -50,6 +52,8 @@ internal sealed class OverlayController : IDisposable
         this.startupRegistrationService = startupRegistrationService;
         this.logger = logger;
         settings = settingsService.Load();
+        localizer = new Localizer(settings.Language);
+        visibilityState.AutomaticDisplayEnabled = settings.ShowAutomaticallyWhenCodexOpens;
         windowFinder = new CodexWindowFinder(logger);
         timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         timer.Tick += (_, _) => Tick();
@@ -86,7 +90,7 @@ internal sealed class OverlayController : IDisposable
     {
         Application.Current.Dispatcher.Invoke(() =>
         {
-            manualHidden = false;
+            visibilityState.RevealManually();
             overlayWindow?.Show();
             ShowSettingsWindow();
             Tick();
@@ -112,6 +116,7 @@ internal sealed class OverlayController : IDisposable
             OnHideOverlay = HideOverlay,
             OnExit = () => Application.Current.Shutdown(),
             OnSettingsChanged = SaveSettings,
+            Localizer = localizer,
         };
 
         hotkeyManager = new HotkeyManager(overlayWindow.Handle);
@@ -132,7 +137,7 @@ internal sealed class OverlayController : IDisposable
             return;
         }
 
-        trayIcon = new TrayIconService();
+        trayIcon = new TrayIconService(localizer);
         trayIcon.ToggleOverlayRequested += ToggleOverlay;
         trayIcon.OpenCodexRequested += processService.LaunchCodex;
         trayIcon.SettingsRequested += ShowSettingsWindow;
@@ -157,6 +162,7 @@ internal sealed class OverlayController : IDisposable
         var found = windowFinder.FindMainWindow();
         if (found is null)
         {
+            visibilityState.MarkCodexUnavailable();
             overlayWindow?.Hide();
             trayIcon?.UpdateOverlayState(false);
             attachedWindow = null;
@@ -167,13 +173,19 @@ internal sealed class OverlayController : IDisposable
         {
             attachedWindow = found;
             overlayWindow!.AttachTo(found.Hwnd);
-            manualHidden = !settings.ShowAutomaticallyWhenCodexOpens;
+            if (!settings.ShowAutomaticallyWhenCodexOpens)
+            {
+                visibilityState.MarkManualHide();
+            }
+
             logger.Info($"Attached overlay to Codex process {found.ProcessId}.");
         }
 
-        overlayWindow!.AllowAutoShow = !manualHidden;
+        visibilityState.AutomaticDisplayEnabled = settings.ShowAutomaticallyWhenCodexOpens;
+        visibilityState.MarkCodexAvailable(found.IsMinimized);
+        overlayWindow!.AllowAutoShow = visibilityState.ShouldShowOverlay;
         overlayWindow.UpdatePlacement(found.Hwnd);
-        if (manualHidden)
+        if (!visibilityState.ShouldShowOverlay)
         {
             overlayWindow.Hide();
         }
@@ -190,7 +202,7 @@ internal sealed class OverlayController : IDisposable
         }
         else
         {
-            manualHidden = false;
+            visibilityState.RevealManually();
             overlayWindow.AllowAutoShow = true;
             overlayWindow.Show();
             Tick();
@@ -199,7 +211,7 @@ internal sealed class OverlayController : IDisposable
 
     private void HideOverlay()
     {
-        manualHidden = true;
+        visibilityState.MarkManualHide();
         overlayWindow?.Hide();
         trayIcon?.UpdateOverlayState(false);
     }
@@ -220,7 +232,7 @@ internal sealed class OverlayController : IDisposable
         catch (Exception exception)
         {
             logger.Error("Profile refresh failed.", exception);
-            overlayWindow?.ShowError("Could not refresh profiles. Check the profiles folder.");
+            overlayWindow?.ShowError(localizer["CouldNotRefreshProfiles"]);
         }
     }
 
@@ -239,7 +251,7 @@ internal sealed class OverlayController : IDisposable
 
         if (conflicts.Count > 0)
         {
-            overlayWindow?.ShowError("One or more hotkeys could not be registered.");
+            overlayWindow?.ShowError(localizer["HotkeysCouldNotRegister"]);
         }
 
         return conflicts;
@@ -255,7 +267,7 @@ internal sealed class OverlayController : IDisposable
         switching = true;
         overlayWindow?.SetSwitching(true);
         hotkeyManager?.Clear();
-        overlayWindow?.ShowNotification($"Switching to {profileName}...");
+        overlayWindow?.ShowNotification(localizer.Format("SwitchingToProfile", profileName));
         try
         {
             bool allowForceClose = settings.ForceCloseFallback;
@@ -263,7 +275,7 @@ internal sealed class OverlayController : IDisposable
             {
                 allowForceClose = MessageBox.Show(
                     overlayWindow,
-                    "Codex will be asked to close gracefully. If it is still running after the timeout, allow force closing Codex to complete the switch?",
+                    localizer["ForceClosePrompt"],
                     "Codex Profile Overlay",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) == MessageBoxResult.Yes;
@@ -278,14 +290,14 @@ internal sealed class OverlayController : IDisposable
                 await WaitForCodexWindowAsync(disposalTokenSource.Token).ConfigureAwait(true);
             }
 
-            overlayWindow?.ShowNotification($"Switched to account: {profileName}");
+            overlayWindow?.ShowNotification(localizer.Format("SwitchedToAccount", profileName));
             logger.Info($"Switched to profile '{profileName}'.");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.Error($"Switch to profile '{profileName}' failed.", exception);
-            overlayWindow?.ShowError("Could not switch account. Previous authorization was restored.");
-            trayIcon?.ShowBalloon("Codex Profile Overlay", "Could not switch account. Previous authorization was restored.");
+            overlayWindow?.ShowError(localizer["CouldNotSwitch"] + " " + localizer["PreviousAuthorizationRestored"] + ".");
+            trayIcon?.ShowBalloon("Codex Profile Overlay", localizer["CouldNotSwitch"] + " " + localizer["PreviousAuthorizationRestored"] + ".");
         }
         finally
         {
@@ -299,7 +311,8 @@ internal sealed class OverlayController : IDisposable
     private async Task AddProfileAsync()
     {
         EnsureOverlay();
-        string? profileName = PromptDialog.Show(overlayWindow!, "Add profile", "Profile directory name");
+        Window? dialogOwner = PromptOwner();
+        string? profileName = ShowPrompt(dialogOwner, localizer["AddProfileTitle"], localizer["ProfileDirectoryName"], primaryText: localizer["Add"]);
         if (string.IsNullOrWhiteSpace(profileName))
         {
             return;
@@ -308,17 +321,20 @@ internal sealed class OverlayController : IDisposable
         try
         {
             string directory = profileManager.CreateProfileDirectory(profileName);
-            overlayWindow?.ShowNotification($"Starting Codex login for {profileName}...");
+            overlayWindow?.ShowNotification(localizer.Format("StartingLogin", profileName));
             bool loginCreatedAuth = await processService.LoginProfileAsync(directory, disposalTokenSource.Token).ConfigureAwait(true);
             if (!loginCreatedAuth)
             {
-                overlayWindow?.ShowError("Login finished, but auth.json was not created.");
+                overlayWindow?.ShowError(localizer["AuthNotCreated"]);
                 return;
             }
 
             RefreshProfiles();
-            overlayWindow?.ShowNotification("Profile added successfully");
-            if (MessageBox.Show(overlayWindow, "Switch to the newly added profile now?", "Codex Profile Overlay", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            overlayWindow?.ShowNotification(localizer["ProfileAdded"]);
+            MessageBoxResult switchNewProfile = dialogOwner is null
+                ? MessageBox.Show(localizer["SwitchNewProfile"], "Codex Profile Overlay", MessageBoxButton.YesNo, MessageBoxImage.Question)
+                : MessageBox.Show(dialogOwner, localizer["SwitchNewProfile"], "Codex Profile Overlay", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (switchNewProfile == MessageBoxResult.Yes)
             {
                 await SwitchProfileAsync(profileName).ConfigureAwait(true);
             }
@@ -326,7 +342,7 @@ internal sealed class OverlayController : IDisposable
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.Error("Add profile failed.", exception);
-            overlayWindow?.ShowError("Could not add profile.");
+            overlayWindow?.ShowError(localizer["CouldNotAddProfile"]);
         }
     }
 
@@ -334,13 +350,14 @@ internal sealed class OverlayController : IDisposable
     {
         if (settingsWindow is { IsVisible: true })
         {
-            settingsWindow.Activate();
+            BringToFront(settingsWindow);
             return;
         }
 
         settingsWindow = new SettingsWindow(
             settings,
             profiles,
+            localizer,
             SaveSettings,
             () => _ = AddProfileAsync(),
             ShowProfileManager,
@@ -353,7 +370,7 @@ internal sealed class OverlayController : IDisposable
             ResetSettings,
             () => Application.Current.Shutdown());
         settingsWindow.Closed += (_, _) => settingsWindow = null;
-        settingsWindow.Show();
+        ShowCodexOwnedWindow(settingsWindow);
         settingsWindow.SetConflicts(RegisterHotkeys());
     }
 
@@ -361,27 +378,27 @@ internal sealed class OverlayController : IDisposable
     {
         if (profileManagerWindow is { IsVisible: true })
         {
-            profileManagerWindow.Activate();
+            BringToFront(profileManagerWindow);
             return;
         }
 
         profileManagerWindow = new ProfileManagerWindow(
             profiles,
             activeProfileStore.Read(),
+            localizer,
             () => _ = AddProfileAsync(),
             RenameDisplayName,
-            RenameDirectory,
             RemoveProfile,
             ReorderProfiles,
             profile => OpenFolder(profile.DirectoryPath),
             RefreshProfiles);
         profileManagerWindow.Closed += (_, _) => profileManagerWindow = null;
-        profileManagerWindow.Show();
+        ShowCodexOwnedWindow(profileManagerWindow);
     }
 
     private void RenameDisplayName(ProfileInfo profile)
     {
-        string? name = PromptDialog.Show(profileManagerWindow!, "Rename display name", "Display name", profile.DisplayName);
+        string? name = ShowPrompt(PromptOwner(), localizer["RenameDisplayName"], localizer["DisplayName"], profile.DisplayName, localizer["Save"]);
         if (string.IsNullOrWhiteSpace(name))
         {
             return;
@@ -389,18 +406,18 @@ internal sealed class OverlayController : IDisposable
 
         profileManager.RenameDisplayName(profile.Name, name);
         RefreshProfiles();
-        overlayWindow?.ShowNotification("Profile renamed");
+        overlayWindow?.ShowNotification(localizer["ProfileRenamed"]);
     }
 
     private void RenameDirectory(ProfileInfo profile)
     {
         if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
         {
-            overlayWindow?.ShowError("The active profile folder cannot be renamed.");
+            overlayWindow?.ShowError(localizer["ActiveProfileCannotRemove"]);
             return;
         }
 
-        string? name = PromptDialog.Show(profileManagerWindow!, "Rename profile folder", "New folder name", profile.Name);
+        string? name = ShowPrompt(PromptOwner(), "Rename profile folder", "New folder name", profile.Name, localizer["Save"]);
         if (string.IsNullOrWhiteSpace(name))
         {
             return;
@@ -408,25 +425,106 @@ internal sealed class OverlayController : IDisposable
 
         profileManager.RenameDirectory(profile.Name, name);
         RefreshProfiles();
-        overlayWindow?.ShowNotification("Profile renamed");
+        overlayWindow?.ShowNotification(localizer["ProfileRenamed"]);
     }
 
     private void RemoveProfile(ProfileInfo profile)
     {
-        if (MessageBox.Show(profileManagerWindow, "This moves the local saved login to the removed-profiles folder. It does not delete your ChatGPT account.", "Remove profile", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+        if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
+        {
+            overlayWindow?.ShowError(localizer["ActiveProfileCannotRename"]);
+            return;
+        }
+
+        if (MessageBox.Show(profileManagerWindow, localizer["RemoveProfilePrompt"], localizer["Remove"], MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
         {
             return;
         }
 
         profileManager.RemoveProfile(profile.Name, activeProfileStore.Read());
         RefreshProfiles();
-        overlayWindow?.ShowNotification("Profile removed from switcher");
+        overlayWindow?.ShowNotification(localizer["ProfileRemoved"]);
     }
 
     private void ReorderProfiles(IReadOnlyList<string> orderedNames)
     {
         profileManager.Reorder(orderedNames);
         RefreshProfiles();
+    }
+
+    private Window? PromptOwner()
+    {
+        if (settingsWindow is { IsVisible: true })
+        {
+            return settingsWindow;
+        }
+
+        if (profileManagerWindow is { IsVisible: true })
+        {
+            return profileManagerWindow;
+        }
+
+        return null;
+    }
+
+    private string? ShowPrompt(Window? owner, string title, string label, string initialValue = "", string? primaryText = null)
+    {
+        return PromptDialog.Show(owner, owner is null ? CurrentCodexWindowHandle() : IntPtr.Zero, title, label, initialValue, primaryText ?? localizer["Save"], localizer["Cancel"]);
+    }
+
+    private void ShowCodexOwnedWindow(Window window)
+    {
+        AttachToCodexOwner(window);
+        window.ShowInTaskbar = false;
+        window.Show();
+        BringToFront(window);
+    }
+
+    private void AttachToCodexOwner(Window window)
+    {
+        IntPtr owner = CurrentCodexWindowHandle();
+        if (owner == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (NativeMethods.IsIconic(owner))
+        {
+            _ = NativeMethods.ShowWindow(owner, NativeMethods.SwRestore);
+        }
+
+        var helper = new WindowInteropHelper(window);
+        helper.Owner = owner;
+    }
+
+    private IntPtr CurrentCodexWindowHandle()
+    {
+        if (attachedWindow is not null && NativeMethods.IsWindowVisible(attachedWindow.Hwnd))
+        {
+            return attachedWindow.Hwnd;
+        }
+
+        var found = windowFinder.FindMainWindow();
+        if (found is null)
+        {
+            return IntPtr.Zero;
+        }
+
+        attachedWindow = found;
+        return found.Hwnd;
+    }
+
+    private static void BringToFront(Window window)
+    {
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+
+        window.Show();
+        window.Activate();
+        window.Focus();
+        _ = NativeMethods.SetForegroundWindow(new WindowInteropHelper(window).Handle);
     }
 
     private void ApplySettings()
@@ -439,9 +537,19 @@ internal sealed class OverlayController : IDisposable
 
     private void SaveSettings(OverlaySettings updatedSettings)
     {
-        settings = updatedSettings;
-        settingsService.Save(settings);
-        ApplySettings();
+        try
+        {
+            settings = updatedSettings;
+            localizer.SetLanguage(settings.Language);
+            visibilityState.AutomaticDisplayEnabled = settings.ShowAutomaticallyWhenCodexOpens;
+            settingsService.Save(settings);
+            ApplySettings();
+        }
+        catch (Exception exception)
+        {
+            logger.Error("Could not save settings.", exception);
+            overlayWindow?.ShowError(localizer["CouldNotSaveSettings"]);
+        }
     }
 
     private void ApplyStartupSetting()
@@ -454,15 +562,15 @@ internal sealed class OverlayController : IDisposable
         catch (Exception exception)
         {
             logger.Error("Could not update startup registration.", exception);
-            overlayWindow?.ShowError("Start with Windows could not be updated.");
+            overlayWindow?.ShowError(localizer["StartupCouldNotUpdate"]);
         }
     }
 
     private void ResetPosition()
     {
-        settings.PositionPreset = PositionPreset.TopRight;
-        settings.OffsetX = 14;
-        settings.OffsetY = 34;
+        settings.PositionPreset = PositionPreset.AfterMenu;
+        settings.OffsetX = 376;
+        settings.OffsetY = 6;
         SaveSettings(settings);
     }
 

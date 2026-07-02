@@ -6,6 +6,8 @@ public sealed class OverlayLayoutService
 {
     private const double CompactThreshold = 760;
     private const double ExpandedThreshold = 840;
+    private const double AfterMenuX = 376;
+    private const double AfterMenuY = 6;
 
     public OverlayDisplayMode ResolveDisplayMode(OverlayDisplayMode configuredMode, double clientWidth, OverlayDisplayMode previousAutoMode)
     {
@@ -40,6 +42,7 @@ public sealed class OverlayLayoutService
         const double safeSide = 14;
         double x = preset switch
         {
+            PositionPreset.AfterMenu => customOffsetX > 0 ? customOffsetX : AfterMenuX,
             PositionPreset.TopLeft => safeSide,
             PositionPreset.TopCenter => (clientWidth - overlayWidth) / 2,
             PositionPreset.TopRight => clientWidth - overlayWidth - 138,
@@ -47,7 +50,12 @@ public sealed class OverlayLayoutService
             _ => safeSide,
         };
 
-        double y = preset == PositionPreset.Custom ? customOffsetY : safeTop;
+        double y = preset switch
+        {
+            PositionPreset.AfterMenu => customOffsetY >= 0 ? customOffsetY : AfterMenuY,
+            PositionPreset.Custom => customOffsetY,
+            _ => safeTop,
+        };
         return new OverlayPlacement(
             Clamp(x, 0, Math.Max(0, clientWidth - overlayWidth)),
             Clamp(y, 0, Math.Max(0, clientHeight - overlayHeight)));
@@ -55,6 +63,21 @@ public sealed class OverlayLayoutService
 
     public static double Clamp(double value, double minimum, double maximum)
     {
+        if (!double.IsFinite(value))
+        {
+            return minimum;
+        }
+
+        if (!double.IsFinite(minimum))
+        {
+            minimum = 0;
+        }
+
+        if (!double.IsFinite(maximum) || maximum < minimum)
+        {
+            maximum = minimum;
+        }
+
         return Math.Min(Math.Max(value, minimum), maximum);
     }
 }

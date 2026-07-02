@@ -35,12 +35,14 @@ internal sealed class CodexWindowFinder
 
     private CodexWindowInfo? TryCreateWindowInfo(IntPtr hwnd)
     {
-        if (!NativeMethods.IsWindowVisible(hwnd) || NativeMethods.IsIconic(hwnd))
+        if (!NativeMethods.IsWindowVisible(hwnd))
         {
             return null;
         }
 
-        if (!NativeMethods.GetWindowRect(hwnd, out NativeRect rect) || rect.Width <= 0 || rect.Height <= 0)
+        bool isMinimized = NativeMethods.IsIconic(hwnd);
+
+        if (!NativeMethods.GetWindowRect(hwnd, out NativeRect rect) || (!isMinimized && (rect.Width <= 0 || rect.Height <= 0)))
         {
             return null;
         }
@@ -72,7 +74,7 @@ internal sealed class CodexWindowFinder
                 return null;
             }
 
-            return new CodexWindowInfo(hwnd, process.Id, process.ProcessName, title);
+            return new CodexWindowInfo(hwnd, process.Id, process.ProcessName, title, isMinimized);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
