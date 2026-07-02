@@ -68,9 +68,9 @@ public partial class App : Application
         IReadOnlyDictionary<string, string> palette = theme == AppTheme.Light ? LightTheme : DarkTheme;
         foreach ((string key, string value) in palette)
         {
-            if (Current.Resources[key] is SolidColorBrush brush && ColorConverter.ConvertFromString(value) is Color color)
+            if (ColorConverter.ConvertFromString(value) is Color color)
             {
-                brush.Color = color;
+                Current.Resources[key] = new SolidColorBrush(color);
             }
         }
     }

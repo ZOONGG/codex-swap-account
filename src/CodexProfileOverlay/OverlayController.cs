@@ -184,13 +184,17 @@ internal sealed class OverlayController : IDisposable
 
         visibilityState.AutomaticDisplayEnabled = settings.ShowAutomaticallyWhenCodexOpens;
         visibilityState.MarkCodexAvailable(found.IsMinimized);
-        overlayWindow!.AllowAutoShow = visibilityState.ShouldShowOverlay;
-        overlayWindow.UpdatePlacement(found.Hwnd);
-        if (!visibilityState.ShouldShowOverlay)
+        bool foregroundBelongsToCodexOrOverlay = ForegroundBelongsToCodexOrOverlay(found);
+        bool shouldShowOverlay = visibilityState.ShouldShowOverlay && foregroundBelongsToCodexOrOverlay;
+        overlayWindow!.AllowAutoShow = shouldShowOverlay;
+        if (!shouldShowOverlay)
         {
             overlayWindow.Hide();
+            trayIcon?.UpdateOverlayState(false);
+            return;
         }
 
+        overlayWindow.UpdatePlacement(found.Hwnd);
         trayIcon?.UpdateOverlayState(overlayWindow.IsVisible);
     }
 
@@ -581,8 +585,27 @@ internal sealed class OverlayController : IDisposable
     {
         settings = new OverlaySettings();
         settingsService.Save(settings);
+        App.ApplyTheme(settings.Theme);
         overlayWindow?.ApplySettings();
+        settingsWindow?.RefreshTheme();
         RefreshProfiles();
+    }
+
+    private static bool ForegroundBelongsToCodexOrOverlay(CodexWindowInfo codexWindow)
+    {
+        IntPtr foreground = NativeMethods.GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (foreground == codexWindow.Hwnd)
+        {
+            return true;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(foreground, out uint processId);
+        return processId == Environment.ProcessId || processId == codexWindow.ProcessId;
     }
 
     private async Task WaitForCodexWindowAsync(CancellationToken cancellationToken)

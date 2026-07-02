@@ -166,7 +166,7 @@ internal sealed class OverlayWindow : Window
             (int)Math.Round(Top),
             0,
             0,
-            NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+            NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
     }
 
     public void SetProfiles(IReadOnlyList<ProfileInfo> newProfiles, string? newActiveProfile)
