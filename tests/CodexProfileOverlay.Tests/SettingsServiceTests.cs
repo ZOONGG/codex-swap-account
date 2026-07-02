@@ -18,4 +18,29 @@ public sealed class SettingsServiceTests
         Assert.Equal(123.5, loaded.OffsetX);
         Assert.Equal(42.25, loaded.OffsetY);
     }
+
+    [Fact]
+    public void SaveAndLoad_RoundTripsDisplayAndHotkeys()
+    {
+        using var temp = new TempDirectory();
+        var service = new SettingsService(Path.Combine(temp.Path, "settings.json"));
+
+        service.Save(new OverlaySettings
+        {
+            DisplayMode = OverlayDisplayMode.Compact,
+            PositionPreset = PositionPreset.TopCenter,
+            Hotkeys = new HotkeySettings
+            {
+                ToggleOverlay = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Shift, 'K'),
+                ProfileHotkeys = [new HotkeyGesture(HotkeyModifiers.Alt, '1')],
+            },
+        });
+
+        var loaded = service.Load();
+
+        Assert.Equal(OverlayDisplayMode.Compact, loaded.DisplayMode);
+        Assert.Equal(PositionPreset.TopCenter, loaded.PositionPreset);
+        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Shift, 'K'), loaded.Hotkeys.ToggleOverlay);
+        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Alt, '1'), loaded.Hotkeys.ProfileHotkeys[0]);
+    }
 }

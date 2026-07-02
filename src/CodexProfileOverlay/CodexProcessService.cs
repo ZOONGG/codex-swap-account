@@ -13,7 +13,7 @@ internal sealed class CodexProcessService
         this.logger = logger;
     }
 
-    public async Task CloseCodexAsync(CancellationToken cancellationToken)
+    public async Task CloseCodexAsync(int gracefulTimeoutSeconds, bool allowForceClose, CancellationToken cancellationToken)
     {
         var processes = FindCodexProcesses().ToArray();
         foreach (Process process in processes)
@@ -35,10 +35,15 @@ internal sealed class CodexProcessService
             }
         }
 
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Clamp(gracefulTimeoutSeconds, 1, 60));
         while (DateTimeOffset.UtcNow < deadline && FindCodexProcesses().Any())
         {
             await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!allowForceClose)
+        {
+            return;
         }
 
         foreach (Process process in FindCodexProcesses())
@@ -78,6 +83,25 @@ internal sealed class CodexProcessService
         };
         startInfo.Environment.Remove("CODEX_HOME");
         _ = Process.Start(startInfo);
+    }
+
+    public async Task<bool> LoginProfileAsync(string profileDirectory, CancellationToken cancellationToken)
+    {
+        string fullProfileDirectory = Path.GetFullPath(profileDirectory);
+        Directory.CreateDirectory(fullProfileDirectory);
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = "/c codex login",
+            UseShellExecute = false,
+            CreateNoWindow = false,
+            WorkingDirectory = fullProfileDirectory,
+        };
+        startInfo.Environment["CODEX_HOME"] = fullProfileDirectory;
+
+        using Process process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start codex login.");
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        return process.ExitCode == 0 && File.Exists(Path.Combine(fullProfileDirectory, "auth.json"));
     }
 
     private bool TryLaunchStartMenuApp()

@@ -21,6 +21,10 @@ if ([string]::IsNullOrWhiteSpace($Output)) {
     $Output = Join-Path $repo "artifacts\publish"
 }
 
+if (Test-Path -LiteralPath $Output) {
+    Remove-Item -LiteralPath $Output -Recurse -Force
+}
+
 & $dotnet.Source publish (Join-Path $repo "src\CodexProfileOverlay\CodexProfileOverlay.csproj") `
     -c $Configuration `
     -r win-x64 `
@@ -32,4 +36,11 @@ if ([string]::IsNullOrWhiteSpace($Output)) {
     -o $Output
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+$zip = Join-Path $repo "artifacts\CodexProfileOverlay-win-x64-portable.zip"
+if (Test-Path -LiteralPath $zip) {
+    Remove-Item -LiteralPath $zip -Force
+}
+Compress-Archive -Path (Join-Path $Output "*") -DestinationPath $zip -Force
+
 Write-Host "Published to $Output"
+Write-Host "Portable zip: $zip"

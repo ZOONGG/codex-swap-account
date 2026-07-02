@@ -8,6 +8,10 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using CodexProfileOverlay.Core.Models;
 using CodexProfileOverlay.Core.Services;
+using Button = System.Windows.Controls.Button;
+using Control = System.Windows.Controls.Control;
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+using Point = System.Windows.Point;
 
 namespace CodexProfileOverlay;
 
@@ -16,14 +20,19 @@ internal sealed class OverlayWindow : Window
     private static readonly TimeSpan AnimationDuration = TimeSpan.FromMilliseconds(150);
     private readonly OverlaySettings settings;
     private readonly SafeLogger logger;
-    private readonly StackPanel profilePanel = new() { Orientation = Orientation.Horizontal };
-    private readonly Border notificationBorder;
-    private readonly TextBlock notificationText;
+    private readonly OverlayLayoutService layoutService = new();
+    private readonly Border shell = new();
+    private readonly Popup compactPopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom };
     private readonly List<Button> profileButtons = [];
     private HwndSource? hwndSource;
+    private IReadOnlyList<ProfileInfo> profiles = [];
+    private string? activeProfile;
     private IntPtr ownerHwnd;
     private bool isDragging;
+    private bool isSwitching;
     private Point dragOffset;
+    private OverlayDisplayMode resolvedAutoMode = OverlayDisplayMode.Expanded;
+    private OverlayDisplayMode currentMode = OverlayDisplayMode.Expanded;
 
     public OverlayWindow(OverlaySettings settings, SafeLogger logger)
     {
@@ -38,32 +47,22 @@ internal sealed class OverlayWindow : Window
         ShowActivated = false;
         ResizeMode = ResizeMode.NoResize;
         Topmost = false;
+        RenderTransformOrigin = new Point(0.5, 0.5);
+        RenderTransform = new ScaleTransform(settings.Scale, settings.Scale);
 
-        notificationText = new TextBlock
-        {
-            Foreground = Brushes.White,
-            FontSize = 12,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        notificationBorder = new Border
-        {
-            Background = new SolidColorBrush(Color.FromRgb(47, 43, 58)),
-            BorderBrush = FindBrush("AccentBrush"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Margin = new Thickness(0, 8, 0, 0),
-            Padding = new Thickness(12, 7, 12, 7),
-            Opacity = 0,
-            Visibility = Visibility.Collapsed,
-            Child = notificationText,
-        };
-
-        Content = BuildContent();
+        Content = shell;
+        RebuildContent();
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseMove += OnMouseMove;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
         SourceInitialized += OnSourceInitialized;
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible)
+            {
+                compactPopup.IsOpen = false;
+            }
+        };
     }
 
     public Action<string>? OnSwitchProfile { get; set; }
@@ -74,9 +73,21 @@ internal sealed class OverlayWindow : Window
 
     public Action? OnOpenApplicationDataFolder { get; set; }
 
+    public Action? OnOpenSettings { get; set; }
+
+    public Action? OnManageProfiles { get; set; }
+
+    public Action? OnAddProfile { get; set; }
+
+    public Action? OnHideOverlay { get; set; }
+
     public Action? OnExit { get; set; }
 
     public Action<OverlaySettings>? OnSettingsChanged { get; set; }
+
+    public IntPtr Handle => new WindowInteropHelper(this).EnsureHandle();
+
+    public bool AllowAutoShow { get; set; } = true;
 
     public void AttachTo(IntPtr codexHwnd)
     {
@@ -92,21 +103,49 @@ internal sealed class OverlayWindow : Window
         if (!NativeMethods.IsWindowVisible(codexHwnd) || NativeMethods.IsIconic(codexHwnd))
         {
             Hide();
+            compactPopup.IsOpen = false;
             return;
         }
 
         if (!TryGetClientBounds(codexHwnd, out Rect clientBounds))
         {
             Hide();
+            compactPopup.IsOpen = false;
             return;
         }
 
-        settings.OffsetX = Clamp(settings.OffsetX, 0, Math.Max(0, clientBounds.Width - ActualWidth));
-        settings.OffsetY = Clamp(settings.OffsetY, 0, Math.Max(0, clientBounds.Height - ActualHeight));
-        Left = clientBounds.Left + settings.OffsetX;
-        Top = clientBounds.Top + settings.OffsetY;
+        OverlayDisplayMode nextMode = layoutService.ResolveDisplayMode(settings.DisplayMode, clientBounds.Width, resolvedAutoMode);
+        if (settings.DisplayMode == OverlayDisplayMode.Auto)
+        {
+            resolvedAutoMode = nextMode;
+        }
 
-        if (!IsVisible)
+        if (nextMode != currentMode)
+        {
+            currentMode = nextMode;
+            RebuildContent();
+        }
+
+        UpdateLayout();
+        var placement = layoutService.CalculatePlacement(
+            settings.PositionPreset,
+            clientBounds.Width,
+            clientBounds.Height,
+            ActualWidth,
+            ActualHeight,
+            settings.OffsetX,
+            settings.OffsetY);
+
+        if (settings.PositionPreset == PositionPreset.Custom)
+        {
+            settings.OffsetX = placement.OffsetX;
+            settings.OffsetY = placement.OffsetY;
+        }
+
+        Left = clientBounds.Left + placement.OffsetX;
+        Top = clientBounds.Top + placement.OffsetY;
+
+        if (!IsVisible && settings.ShowAutomaticallyWhenCodexOpens && AllowAutoShow)
         {
             Show();
         }
@@ -122,59 +161,128 @@ internal sealed class OverlayWindow : Window
             NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
     }
 
-    public void SetProfiles(IReadOnlyList<ProfileInfo> profiles, string? activeProfile)
+    public void SetProfiles(IReadOnlyList<ProfileInfo> newProfiles, string? newActiveProfile)
     {
-        profilePanel.Children.Clear();
-        profileButtons.Clear();
-
-        foreach (ProfileInfo profile in profiles)
-        {
-            Button button = CreateProfileButton(profile.Name, string.Equals(profile.Name, activeProfile, StringComparison.OrdinalIgnoreCase));
-            profilePanel.Children.Add(button);
-            profileButtons.Add(button);
-        }
+        profiles = newProfiles;
+        activeProfile = newActiveProfile;
+        RebuildContent();
     }
 
-    public void SetSwitching(bool isSwitching)
+    public void SetSwitching(bool switching)
     {
+        isSwitching = switching;
+        compactPopup.IsOpen = false;
         foreach (Button button in profileButtons)
         {
-            button.IsEnabled = !isSwitching;
+            button.IsEnabled = !switching;
         }
     }
 
-    public void ShowNotification(string message) => ShowTransientMessage(message, isError: false);
+    public void ShowNotification(string message) => ToastWindow.Show(ownerHwnd, message, isError: false);
 
-    public void ShowError(string message) => ShowTransientMessage(message, isError: true);
+    public void ShowError(string message) => ToastWindow.Show(ownerHwnd, message, isError: true);
 
-    private UIElement BuildContent()
+    public void ApplySettings()
     {
-        var root = new StackPanel
-        {
-            Orientation = Orientation.Vertical,
-        };
+        RenderTransform = new ScaleTransform(settings.Scale, settings.Scale);
+        RebuildContent();
+    }
 
-        var shell = new Border
+    private void RebuildContent()
+    {
+        Width = currentMode == OverlayDisplayMode.Compact ? 286 : 520;
+        shell.Height = currentMode == OverlayDisplayMode.Compact ? 44 : 46;
+        shell.Background = FindBrush("OverlayBackgroundBrush");
+        shell.BorderBrush = FindBrush("OverlayBorderBrush");
+        shell.BorderThickness = new Thickness(1);
+        shell.CornerRadius = new CornerRadius(8);
+        shell.Padding = currentMode == OverlayDisplayMode.Compact ? new Thickness(8, 5, 8, 5) : new Thickness(6);
+        shell.Child = currentMode == OverlayDisplayMode.Compact ? BuildCompactContent() : BuildExpandedContent();
+        compactPopup.Child = BuildCompactPopup();
+    }
+
+    private UIElement BuildCompactContent()
+    {
+        ProfileInfo? active = profiles.FirstOrDefault(profile => string.Equals(profile.Name, activeProfile, StringComparison.OrdinalIgnoreCase))
+            ?? profiles.FirstOrDefault();
+
+        var button = new Button
         {
-            Height = 46,
-            Background = FindBrush("OverlayBackgroundBrush"),
-            BorderBrush = FindBrush("OverlayBorderBrush"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(6),
-            Effect = null,
+            BorderThickness = new Thickness(0),
+            Background = Brushes.Transparent,
+            Cursor = Cursors.Hand,
+            IsEnabled = !isSwitching,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
+        button.Click += (_, _) =>
+        {
+            compactPopup.PlacementTarget = button;
+            compactPopup.IsOpen = true;
         };
 
         var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var avatar = CreateAvatar(active?.Initials ?? "--", active?.Accent ?? "#A970FF");
+        Grid.SetColumn(avatar, 0);
+        grid.Children.Add(avatar);
+
+        var name = new TextBlock
+        {
+            Text = isSwitching ? "Switching..." : active?.DisplayName ?? "No profiles",
+            Foreground = FindBrush("StrongTextBrush"),
+            FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(9, 0, 8, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        Grid.SetColumn(name, 1);
+        grid.Children.Add(name);
+
+        var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        right.Children.Add(new Ellipse { Width = 7, Height = 7, Fill = FindBrush("AccentBrush"), Margin = new Thickness(0, 0, 8, 0) });
+        right.Children.Add(new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse("M 2 4 L 7 9 L 12 4"),
+            Stroke = FindBrush("MutedTextBrush"),
+            StrokeThickness = 1.8,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            Width = 14,
+            Height = 12,
+            Stretch = Stretch.Uniform,
+        });
+        Grid.SetColumn(right, 2);
+        grid.Children.Add(right);
+        button.Content = grid;
+        button.MouseEnter += (_, _) => shell.Background = FindBrush("TabHoverBrush");
+        button.MouseLeave += (_, _) => shell.Background = FindBrush("OverlayBackgroundBrush");
+        return button;
+    }
+
+    private UIElement BuildExpandedContent()
+    {
+        profileButtons.Clear();
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var panel = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (ProfileInfo profile in profiles)
+        {
+            Button button = CreateProfileButton(profile, string.Equals(profile.Name, activeProfile, StringComparison.OrdinalIgnoreCase));
+            panel.Children.Add(button);
+            profileButtons.Add(button);
+        }
 
         var scrollViewer = new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
             CanContentScroll = true,
-            Content = profilePanel,
+            Content = panel,
         };
         Grid.SetColumn(scrollViewer, 0);
 
@@ -182,39 +290,63 @@ internal sealed class OverlayWindow : Window
         Grid.SetColumn(menuButton, 1);
         grid.Children.Add(scrollViewer);
         grid.Children.Add(menuButton);
-        shell.Child = grid;
-        root.Children.Add(shell);
-        root.Children.Add(notificationBorder);
-        return root;
+        return grid;
     }
 
-    private Button CreateProfileButton(string profileName, bool isActive)
+    private UIElement BuildCompactPopup()
     {
-        var text = new TextBlock
+        var border = new Border
         {
-            Text = profileName,
+            Width = 286,
+            Background = FindBrush("OverlayBackgroundBrush"),
+            BorderBrush = FindBrush("OverlayBorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(6),
+        };
+
+        var panel = new StackPanel();
+        foreach (ProfileInfo profile in profiles)
+        {
+            bool isActive = string.Equals(profile.Name, activeProfile, StringComparison.OrdinalIgnoreCase);
+            Button item = CreatePopupButton(profile.DisplayName + (isActive ? "  Active" : string.Empty), isActive ? "M 2 7 L 6 11 L 14 3" : null);
+            item.IsEnabled = !isActive && !isSwitching;
+            string name = profile.Name;
+            item.Click += (_, _) =>
+            {
+                compactPopup.IsOpen = false;
+                OnSwitchProfile?.Invoke(name);
+            };
+            panel.Children.Add(item);
+        }
+
+        panel.Children.Add(new Separator { Margin = new Thickness(2, 5, 2, 5) });
+        panel.Children.Add(CreatePopupCommand("Add profile", OnAddProfile));
+        panel.Children.Add(CreatePopupCommand("Manage profiles", OnManageProfiles));
+        panel.Children.Add(CreatePopupCommand("Settings", OnOpenSettings));
+        panel.Children.Add(CreatePopupCommand("Hide switcher", OnHideOverlay));
+        border.Child = panel;
+        return border;
+    }
+
+    private Button CreateProfileButton(ProfileInfo profile, bool isActive)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        row.Children.Add(CreateAvatar(profile.Initials, profile.Accent, 20));
+        row.Children.Add(new TextBlock
+        {
+            Text = profile.DisplayName,
             FontSize = 13,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Foreground = isActive ? FindBrush("StrongTextBrush") : FindBrush("MutedTextBrush"),
             VerticalAlignment = VerticalAlignment.Center,
-            MaxWidth = 118,
-        };
-
-        var dot = new Ellipse
+            Margin = new Thickness(7, 0, 0, 0),
+            MaxWidth = 112,
+        });
+        if (isActive)
         {
-            Width = 7,
-            Height = 7,
-            Fill = FindBrush("AccentBrush"),
-            Visibility = isActive ? Visibility.Visible : Visibility.Collapsed,
-            Margin = new Thickness(0, 0, 6, 0),
-        };
-
-        var row = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children = { dot, text },
-        };
+            row.Children.Add(new Ellipse { Width = 7, Height = 7, Fill = FindBrush("AccentBrush"), Margin = new Thickness(8, 0, 0, 0) });
+        }
 
         var underline = new Border
         {
@@ -232,19 +364,20 @@ internal sealed class OverlayWindow : Window
         var button = new Button
         {
             Content = content,
-            MinWidth = 76,
-            MaxWidth = 148,
+            MinWidth = 94,
+            MaxWidth = 160,
             Height = 34,
             Margin = new Thickness(0, 0, 4, 0),
-            Padding = new Thickness(10, 0, 10, 0),
+            Padding = new Thickness(9, 0, 9, 0),
             BorderThickness = new Thickness(0),
             Background = isActive ? FindBrush("TabActiveBrush") : FindBrush("TabBackgroundBrush"),
             Cursor = Cursors.Hand,
-            Tag = profileName,
-            ToolTip = profileName,
+            Tag = profile.Name,
+            ToolTip = profile.DisplayName,
+            IsEnabled = !isActive && !isSwitching,
         };
 
-        button.Click += (_, _) => OnSwitchProfile?.Invoke(profileName);
+        button.Click += (_, _) => OnSwitchProfile?.Invoke(profile.Name);
         button.MouseEnter += (_, _) => AnimateBrush(button, isActive ? "TabActiveBrush" : "TabHoverBrush");
         button.MouseLeave += (_, _) => AnimateBrush(button, isActive ? "TabActiveBrush" : "TabBackgroundBrush");
         return button;
@@ -276,10 +409,15 @@ internal sealed class OverlayWindow : Window
         };
 
         var menu = new ContextMenu();
+        menu.Items.Add(CreateMenuItem("Add profile", () => OnAddProfile?.Invoke()));
+        menu.Items.Add(CreateMenuItem("Manage profiles", () => OnManageProfiles?.Invoke()));
+        menu.Items.Add(CreateMenuItem("Settings", () => OnOpenSettings?.Invoke()));
+        menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("Refresh profiles", () => OnRefreshProfiles?.Invoke()));
         menu.Items.Add(CreateMenuItem("Open profiles folder", () => OnOpenProfilesFolder?.Invoke()));
         menu.Items.Add(CreateMenuItem("Open application data folder", () => OnOpenApplicationDataFolder?.Invoke()));
         menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem("Hide switcher", () => OnHideOverlay?.Invoke()));
         menu.Items.Add(CreateMenuItem("Exit overlay", () => OnExit?.Invoke()));
         button.ContextMenu = menu;
         button.Click += (_, _) =>
@@ -293,6 +431,60 @@ internal sealed class OverlayWindow : Window
         return button;
     }
 
+    private Button CreatePopupCommand(string text, Action? action)
+    {
+        Button button = CreatePopupButton(text, null);
+        button.Click += (_, _) =>
+        {
+            compactPopup.IsOpen = false;
+            action?.Invoke();
+        };
+        return button;
+    }
+
+    private Button CreatePopupButton(string text, string? iconGeometry)
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        if (iconGeometry is not null)
+        {
+            grid.Children.Add(new System.Windows.Shapes.Path
+            {
+                Data = Geometry.Parse(iconGeometry),
+                Stroke = FindBrush("AccentBrush"),
+                StrokeThickness = 1.8,
+                Width = 16,
+                Height = 16,
+                Stretch = Stretch.Uniform,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+        }
+
+        var label = new TextBlock
+        {
+            Text = text,
+            Foreground = FindBrush("StrongTextBrush"),
+            FontSize = 13,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(label, 1);
+        grid.Children.Add(label);
+
+        return new Button
+        {
+            Content = grid,
+            Height = 34,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(8, 0, 8, 0),
+            Cursor = Cursors.Hand,
+        };
+    }
+
     private static MenuItem CreateMenuItem(string header, Action action)
     {
         var item = new MenuItem { Header = header };
@@ -300,22 +492,25 @@ internal sealed class OverlayWindow : Window
         return item;
     }
 
-    private void ShowTransientMessage(string message, bool isError)
+    private Border CreateAvatar(string initials, string accent, double size = 24)
     {
-        notificationText.Text = message;
-        notificationBorder.BorderBrush = isError ? Brushes.IndianRed : FindBrush("AccentBrush");
-        notificationBorder.Visibility = Visibility.Visible;
-        notificationBorder.BeginAnimation(OpacityProperty, new DoubleAnimation(1, AnimationDuration));
-
-        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(isError ? 6 : 3) };
-        timer.Tick += (_, _) =>
+        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(accent)!;
+        return new Border
         {
-            timer.Stop();
-            var animation = new DoubleAnimation(0, AnimationDuration);
-            animation.Completed += (_, _) => notificationBorder.Visibility = Visibility.Collapsed;
-            notificationBorder.BeginAnimation(OpacityProperty, animation);
+            Width = size,
+            Height = size,
+            CornerRadius = new CornerRadius(size / 2),
+            Background = brush,
+            Child = new TextBlock
+            {
+                Text = initials,
+                Foreground = Brushes.White,
+                FontSize = size <= 20 ? 9 : 10,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
         };
-        timer.Start();
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -339,6 +534,7 @@ internal sealed class OverlayWindow : Window
             return;
         }
 
+        settings.PositionPreset = PositionPreset.Custom;
         isDragging = true;
         dragOffset = e.GetPosition(this);
         CaptureMouse();
@@ -354,8 +550,8 @@ internal sealed class OverlayWindow : Window
 
         Point screenPoint = PointToScreen(e.GetPosition(this));
         Point screenDip = DeviceToDip(screenPoint);
-        settings.OffsetX = Clamp(screenDip.X - clientBounds.Left - dragOffset.X, 0, Math.Max(0, clientBounds.Width - ActualWidth));
-        settings.OffsetY = Clamp(screenDip.Y - clientBounds.Top - dragOffset.Y, 0, Math.Max(0, clientBounds.Height - ActualHeight));
+        settings.OffsetX = OverlayLayoutService.Clamp(screenDip.X - clientBounds.Left - dragOffset.X, 0, Math.Max(0, clientBounds.Width - ActualWidth));
+        settings.OffsetY = OverlayLayoutService.Clamp(screenDip.Y - clientBounds.Top - dragOffset.Y, 0, Math.Max(0, clientBounds.Height - ActualHeight));
         Left = clientBounds.Left + settings.OffsetX;
         Top = clientBounds.Top + settings.OffsetY;
     }
@@ -369,6 +565,11 @@ internal sealed class OverlayWindow : Window
 
         isDragging = false;
         ReleaseMouseCapture();
+        TrySaveSettings();
+    }
+
+    private void TrySaveSettings()
+    {
         try
         {
             OnSettingsChanged?.Invoke(settings);
@@ -417,14 +618,9 @@ internal sealed class OverlayWindow : Window
         return ((SolidColorBrush)Application.Current.FindResource(resourceKey)).Clone();
     }
 
-    private static double Clamp(double value, double minimum, double maximum)
+    private void AnimateBrush(Control control, string resourceKey)
     {
-        return Math.Min(Math.Max(value, minimum), maximum);
-    }
-
-    private static void AnimateBrush(Control control, string resourceKey)
-    {
-        if (Application.Current.FindResource(resourceKey) is not SolidColorBrush target)
+        if (!settings.AnimationsEnabled || Application.Current.FindResource(resourceKey) is not SolidColorBrush target)
         {
             return;
         }

@@ -11,9 +11,12 @@ public sealed class AppPaths
         ProfilesDirectory = Path.Combine(UserProfile, ".codex-profiles");
         ApplicationDataDirectory = Path.Combine(LocalAppData, "CodexProfileOverlay");
         SettingsFile = Path.Combine(ApplicationDataDirectory, "settings.json");
+        ProfilesMetadataFile = Path.Combine(ApplicationDataDirectory, "profiles.json");
         ActiveProfileFile = Path.Combine(ApplicationDataDirectory, "active-profile.txt");
         BackupDirectory = Path.Combine(ApplicationDataDirectory, "backups");
         LogDirectory = Path.Combine(ApplicationDataDirectory, "logs");
+        RemovedProfilesDirectory = Path.Combine(ApplicationDataDirectory, "removed-profiles");
+        PreflightBackupDirectory = Path.Combine(ApplicationDataDirectory, "preflight-backups");
     }
 
     public string UserProfile { get; }
@@ -30,11 +33,17 @@ public sealed class AppPaths
 
     public string SettingsFile { get; }
 
+    public string ProfilesMetadataFile { get; }
+
     public string ActiveProfileFile { get; }
 
     public string BackupDirectory { get; }
 
     public string LogDirectory { get; }
+
+    public string RemovedProfilesDirectory { get; }
+
+    public string PreflightBackupDirectory { get; }
 
     public static AppPaths FromEnvironment()
     {

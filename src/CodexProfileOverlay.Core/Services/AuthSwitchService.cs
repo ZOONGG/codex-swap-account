@@ -34,6 +34,10 @@ public sealed class AuthSwitchService
         {
             previousProfile = activeProfileStore.Read();
             var targetProfile = profileDiscovery.GetRequiredProfile(targetProfileName);
+            if (string.Equals(previousProfile, targetProfile.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("The selected profile is already active.");
+            }
 
             if (previousProfile is not null && File.Exists(paths.SharedAuthFile))
             {
@@ -45,6 +49,8 @@ public sealed class AuthSwitchService
             {
                 throw new FileNotFoundException($"Profile '{targetProfile.Name}' does not contain auth.json.", targetProfile.AuthFilePath);
             }
+
+            ValidateReadable(targetProfile.AuthFilePath);
 
             if (File.Exists(paths.SharedAuthFile))
             {
@@ -82,5 +88,14 @@ public sealed class AuthSwitchService
         }
 
         new AtomicFileReplacer().ReplaceFromSource(backupPath, paths.SharedAuthFile);
+    }
+
+    private static void ValidateReadable(string path)
+    {
+        using FileStream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length == 0)
+        {
+            throw new InvalidDataException("Target auth.json is empty.");
+        }
     }
 }

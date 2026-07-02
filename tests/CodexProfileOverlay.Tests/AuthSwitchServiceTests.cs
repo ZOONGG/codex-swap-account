@@ -43,6 +43,37 @@ public sealed class AuthSwitchServiceTests
         Assert.Equal("current", temp.ActiveProfileStore.Read());
     }
 
+    [Fact]
+    public async Task SwitchAsync_RejectsAlreadyActiveProfile()
+    {
+        using var temp = new TestLayout();
+        temp.AddProfile("current", "current-auth");
+        temp.WriteSharedAuth("fresh-current-auth");
+        temp.ActiveProfileStore.Write("current");
+        var service = temp.CreateSwitchService();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SwitchAsync("current"));
+
+        Assert.Equal("fresh-current-auth", temp.ReadSharedAuth());
+        Assert.Equal("current", temp.ActiveProfileStore.Read());
+    }
+
+    [Fact]
+    public async Task SwitchAsync_RejectsEmptyTargetAuth()
+    {
+        using var temp = new TestLayout();
+        temp.AddProfile("current", "current-auth");
+        temp.AddProfile("target", string.Empty);
+        temp.WriteSharedAuth("fresh-current-auth");
+        temp.ActiveProfileStore.Write("current");
+        var service = temp.CreateSwitchService();
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.SwitchAsync("target"));
+
+        Assert.Equal("fresh-current-auth", temp.ReadSharedAuth());
+        Assert.Equal("current", temp.ActiveProfileStore.Read());
+    }
+
     private sealed class FailingReplacer : IAtomicFileReplacer
     {
         public void ReplaceFromSource(string sourceFile, string destinationFile)

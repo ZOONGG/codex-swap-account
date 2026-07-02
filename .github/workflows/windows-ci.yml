@@ -1,0 +1,31 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test-publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore CodexProfileOverlay.sln
+      - name: Build
+        run: dotnet build CodexProfileOverlay.sln -c Release -p:Platform=x64 --no-restore
+      - name: Test
+        run: dotnet test CodexProfileOverlay.sln -c Release -p:Platform=x64 --no-build
+      - name: Repository safety scan
+        shell: pwsh
+        run: .\verify-repository-safety.ps1
+      - name: Publish
+        shell: pwsh
+        run: .\publish.ps1 -Configuration Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexProfileOverlay-win-x64
+          path: artifacts/CodexProfileOverlay-win-x64-portable.zip
