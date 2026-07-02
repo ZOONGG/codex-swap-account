@@ -29,10 +29,11 @@ internal sealed class SettingsWindow : Window
     private readonly Grid contentHost = new();
     private readonly TextBlock pageTitle = new();
     private readonly TextBlock statusText = new();
-    private readonly TextBlock conflictText = new();
     private readonly StackPanel navPanel = new();
     private Border? sidebarPanel;
     private Button? themeButton;
+    private string hotkeyConflictMessage = string.Empty;
+    private TextBlock? hotkeyConflictText;
     private IReadOnlyList<ProfileInfo> profiles;
     private SettingsPage page = SettingsPage.General;
     private bool isRebuilding;
@@ -102,7 +103,11 @@ internal sealed class SettingsWindow : Window
 
     public void SetConflicts(IReadOnlyList<string> conflicts)
     {
-        conflictText.Text = conflicts.Count == 0 ? string.Empty : string.Join(Environment.NewLine, conflicts);
+        hotkeyConflictMessage = conflicts.Count == 0 ? string.Empty : string.Join(Environment.NewLine, conflicts);
+        if (hotkeyConflictText is not null)
+        {
+            hotkeyConflictText.Text = hotkeyConflictMessage;
+        }
     }
 
     public void RefreshTheme()
@@ -357,11 +362,11 @@ internal sealed class SettingsWindow : Window
     private UIElement BuildProfilesPage()
     {
         var stack = PageStack();
-        stack.Children.Add(Card(CommandRow(
-            (localizer["AddProfile"], addProfile, true),
-            (localizer["ManageProfiles"], manageProfiles, false),
-            (localizer["OpenProfilesFolder"], openProfilesFolder, false),
-            (localizer["OpenRemovedProfilesFolder"], openRemovedProfilesFolder, false))));
+        stack.Children.Add(Card(CommandGrid(
+            (localizer["AddProfile"], "M 12 5 L 12 19 M 5 12 L 19 12", addProfile, true),
+            (localizer["ManageProfiles"], "M 7 7 C 7 4.8 8.8 3 11 3 C 13.2 3 15 4.8 15 7 C 15 9.2 13.2 11 11 11 C 8.8 11 7 9.2 7 7 Z M 4 21 C 4.8 16.8 7.3 15 11 15 C 14.7 15 17.2 16.8 18 21 M 18 5 L 21 5 M 19.5 3.5 L 19.5 6.5", manageProfiles, false),
+            (localizer["OpenProfilesFolder"], "M 3 6 L 9 6 L 11 8 L 21 8 L 21 18 L 3 18 Z", openProfilesFolder, false),
+            (localizer["OpenRemovedProfilesFolder"], "M 4 6 L 20 6 M 9 6 L 10 4 L 14 4 L 15 6 M 7 9 L 8 20 L 16 20 L 17 9 M 10 12 L 10 17 M 14 12 L 14 17", openRemovedProfilesFolder, false))));
         return stack;
     }
 
@@ -391,8 +396,13 @@ internal sealed class SettingsWindow : Window
             Rebuild();
         }, false)));
 
-        conflictText.Foreground = Brush("ErrorBrush");
-        rows.Add(conflictText);
+        hotkeyConflictText = new TextBlock
+        {
+            Text = hotkeyConflictMessage,
+            Foreground = Brush("ErrorBrush"),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        rows.Add(hotkeyConflictText);
         stack.Children.Add(Card(rows.ToArray()));
         return stack;
     }
@@ -417,14 +427,14 @@ internal sealed class SettingsWindow : Window
             SettingCheck(localizer["ForceCloseFallback"], localizer["ForceCloseFallbackHelp"], settings.ForceCloseFallback, value => settings.ForceCloseFallback = value),
             SettingCheck(localizer["ConfirmForceClose"], localizer["ConfirmForceCloseHelp"], settings.ConfirmBeforeForceClose, value => settings.ConfirmBeforeForceClose = value)));
         stack.Children.Add(Card(CommandGrid(
-            (localizer["OpenApplicationData"], "M 3 6 L 9 6 L 11 8 L 21 8 L 21 18 L 3 18 Z", openApplicationDataFolder),
-            (localizer["OpenBackups"], "M 4 6 L 20 6 L 20 18 L 4 18 Z M 8 10 L 16 10 M 8 14 L 13 14", openBackupsFolder),
-            (localizer["OpenLogs"], "M 6 3 L 16 3 L 20 7 L 20 21 L 6 21 Z M 15 3 L 15 8 L 20 8 M 9 12 L 17 12 M 9 16 L 17 16", openLogsFolder),
-            (localizer["ResetPosition"], "M 12 4 L 12 20 M 4 12 L 20 12 M 7 7 L 4 12 L 7 17 M 17 7 L 20 12 L 17 17", resetPosition),
-            (localizer["ResetSettings"], "M 6 8 C 7.5 5.5 10.2 4 13 4 C 17.4 4 21 7.6 21 12 C 21 16.4 17.4 20 13 20 C 9.9 20 7.2 18.2 5.9 15.6 M 6 8 L 6 4 M 6 8 L 10 8", resetSettings),
-            (localizer["ExportSettings"], "M 12 4 L 12 15 M 8 11 L 12 15 L 16 11 M 5 19 L 19 19", ExportSettings),
-            (localizer["ImportSettings"], "M 12 15 L 12 4 M 8 8 L 12 4 L 16 8 M 5 19 L 19 19", ImportSettings),
-            (localizer["ExitApplication"], "M 10 5 L 5 5 L 5 19 L 10 19 M 13 8 L 17 12 L 13 16 M 8 12 L 17 12", exitApplication))));
+            (localizer["OpenApplicationData"], "M 3 6 L 9 6 L 11 8 L 21 8 L 21 18 L 3 18 Z", openApplicationDataFolder, false),
+            (localizer["OpenBackups"], "M 4 6 L 20 6 L 20 18 L 4 18 Z M 8 10 L 16 10 M 8 14 L 13 14", openBackupsFolder, false),
+            (localizer["OpenLogs"], "M 6 3 L 16 3 L 20 7 L 20 21 L 6 21 Z M 15 3 L 15 8 L 20 8 M 9 12 L 17 12 M 9 16 L 17 16", openLogsFolder, false),
+            (localizer["ResetPosition"], "M 12 4 L 12 20 M 4 12 L 20 12 M 7 7 L 4 12 L 7 17 M 17 7 L 20 12 L 17 17", resetPosition, false),
+            (localizer["ResetSettings"], "M 6 8 C 7.5 5.5 10.2 4 13 4 C 17.4 4 21 7.6 21 12 C 21 16.4 17.4 20 13 20 C 9.9 20 7.2 18.2 5.9 15.6 M 6 8 L 6 4 M 6 8 L 10 8", resetSettings, false),
+            (localizer["ExportSettings"], "M 12 4 L 12 15 M 8 11 L 12 15 L 16 11 M 5 19 L 19 19", ExportSettings, false),
+            (localizer["ImportSettings"], "M 12 15 L 12 4 M 8 8 L 12 4 L 16 8 M 5 19 L 19 19", ImportSettings, false),
+            (localizer["ExitApplication"], "M 10 5 L 5 5 L 5 19 L 10 19 M 13 8 L 17 12 L 13 16 M 8 12 L 17 12", exitApplication, false))));
         return stack;
     }
 
@@ -601,7 +611,12 @@ internal sealed class SettingsWindow : Window
 
             if (modifiers == HotkeyModifiers.None)
             {
-                conflictText.Text = localizer["UseModifier"];
+                hotkeyConflictMessage = localizer["UseModifier"];
+                if (hotkeyConflictText is not null)
+                {
+                    hotkeyConflictText.Text = hotkeyConflictMessage;
+                }
+
                 recording = false;
                 button.Content = value?.ToString() ?? localizer["None"];
                 return;
@@ -677,7 +692,8 @@ internal sealed class SettingsWindow : Window
         if (!TryParseFinite(box.Text, out double parsed))
         {
             box.Text = SanitizeNumber(previousValue, minimum, maximum).ToString("0.##", CultureInfo.InvariantCulture);
-            conflictText.Text = localizer["InvalidNumber"];
+            statusText.Foreground = Brush("ErrorBrush");
+            statusText.Text = localizer["InvalidNumber"];
             return;
         }
 
@@ -727,7 +743,7 @@ internal sealed class SettingsWindow : Window
         return panel;
     }
 
-    private UIElement CommandGrid(params (string Label, string Icon, Action Action)[] actions)
+    private UIElement CommandGrid(params (string Label, string Icon, Action Action, bool Primary)[] actions)
     {
         var panel = new UniformGrid
         {
@@ -735,7 +751,7 @@ internal sealed class SettingsWindow : Window
             Margin = new Thickness(0, -4, 0, -4),
         };
 
-        foreach ((string label, string icon, Action action) in actions)
+        foreach ((string label, string icon, Action action, bool primary) in actions)
         {
             var content = new Grid();
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -746,12 +762,12 @@ internal sealed class SettingsWindow : Window
                 Width = 34,
                 Height = 34,
                 CornerRadius = new CornerRadius(7),
-                Background = Brush("TabActiveBrush"),
+                Background = primary ? Brush("AccentHoverBrush") : Brush("TabActiveBrush"),
                 Margin = new Thickness(0, 0, 12, 0),
                 Child = new System.Windows.Shapes.Path
                 {
                     Data = Geometry.Parse(icon),
-                    Stroke = Brush("AccentBrush"),
+                    Stroke = primary ? Brushes.White : Brush("AccentBrush"),
                     StrokeThickness = 1.8,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
@@ -768,7 +784,7 @@ internal sealed class SettingsWindow : Window
             var text = new TextBlock
             {
                 Text = label,
-                Foreground = Brush("StrongTextBrush"),
+                Foreground = primary ? Brushes.White : Brush("StrongTextBrush"),
                 TextWrapping = TextWrapping.Wrap,
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize = 14.5,
@@ -784,6 +800,11 @@ internal sealed class SettingsWindow : Window
                 MinHeight = 58,
                 Margin = new Thickness(0, 4, 10, 6),
             };
+            if (primary)
+            {
+                button.Style = (Style)FindResource("PrimaryButtonStyle");
+            }
+
             button.Click += (_, _) => action();
             panel.Children.Add(button);
         }

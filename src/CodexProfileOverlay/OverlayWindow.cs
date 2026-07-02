@@ -199,12 +199,13 @@ internal sealed class OverlayWindow : Window
     private void RebuildContent()
     {
         Width = LogicalWidth * SanitizedScale;
-        shell.Height = currentMode == OverlayDisplayMode.Compact ? 42 : 42;
+        shell.Height = double.NaN;
+        shell.MinHeight = currentMode == OverlayDisplayMode.Compact ? 44 : 44;
         shell.Background = FindBrush("OverlayBackgroundBrush");
         shell.BorderBrush = FindBrush("OverlayBorderBrush");
         shell.BorderThickness = new Thickness(1);
         shell.CornerRadius = new CornerRadius(8);
-        shell.Padding = currentMode == OverlayDisplayMode.Compact ? new Thickness(6, 5, 6, 5) : new Thickness(5);
+        shell.Padding = currentMode == OverlayDisplayMode.Compact ? new Thickness(6, 5, 6, 6) : new Thickness(5, 5, 5, 6);
         shell.Child = currentMode == OverlayDisplayMode.Compact ? BuildCompactContent() : BuildExpandedContent();
         compactPopup.Child = BuildCompactPopup();
     }
