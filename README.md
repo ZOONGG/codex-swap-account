@@ -17,10 +17,14 @@ Switch between multiple Codex accounts from an overlay attached directly to the 
 [Report a bug](https://github.com/ZOONGG/codex-swap-account/issues/new?template=bug_report.md) ·
 [Request a feature](https://github.com/ZOONGG/codex-swap-account/issues/new?template=feature_request.md)
 
+<p align="center">
+  <strong>English</strong> ·   <a href="README_RU.md">Русский</a>
+</p>
+
 </div>
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="Codex Swap Account overlay inside the Codex desktop app" width="100%">
+  <img src="docs/images/en/hero.png" alt="Codex Swap Account overlay inside the Codex desktop app" width="100%">
 </p>
 
 > [!IMPORTANT]
@@ -64,7 +68,7 @@ The app runs quietly in the system tray and only shows the overlay when a verifi
 Switch profiles instantly with one click.
 
 <p align="center">
-  <img src="docs/images/expanded-mode.png" alt="Expanded account switcher" width="820">
+  <img src="docs/images/en/expanded-mode.png" alt="Expanded account switcher" width="820">
 </p>
 
 ### Compact mode
@@ -72,7 +76,7 @@ Switch profiles instantly with one click.
 A smaller control with a dropdown for profiles and common actions.
 
 <p align="center">
-  <img src="docs/images/compact-mode.jpg" alt="Compact account switcher" width="760">
+  <img src="docs/images/en/compact-mode.jpg" alt="Compact account switcher" width="760">
 </p>
 
 ### Profile menu
@@ -80,7 +84,7 @@ A smaller control with a dropdown for profiles and common actions.
 Add profiles, open profile management, change settings, or hide the switcher.
 
 <p align="center">
-  <img src="docs/images/profile-menu.jpg" alt="Profile actions menu" width="900">
+  <img src="docs/images/en/profile-menu.jpg" alt="Profile actions menu" width="900">
 </p>
 
 ### Appearance settings
@@ -88,7 +92,7 @@ Add profiles, open profile management, change settings, or hide the switcher.
 Choose the display mode, position, scale, and animation behavior.
 
 <p align="center">
-  <img src="docs/images/settings-appearance.png" alt="Appearance settings" width="900">
+  <img src="docs/images/en/settings-appearance.png" alt="Appearance settings" width="900">
 </p>
 
 ### Profile management
@@ -96,7 +100,7 @@ Choose the display mode, position, scale, and animation behavior.
 Create, organize, and manage local Codex profiles.
 
 <p align="center">
-  <img src="docs/images/settings-profiles.png" alt="Profile management settings" width="900">
+  <img src="docs/images/en/settings-profiles.png" alt="Profile management settings" width="900">
 </p>
 
 ---
