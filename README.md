@@ -24,7 +24,7 @@ Switch between multiple Codex accounts from an overlay attached directly to the 
 </div>
 
 <p align="center">
-  <img src="docs/images/en/hero.png" alt="Codex Swap Account overlay inside the Codex desktop app" width="100%">
+  <img src="docs/images/en/hero.jpg" alt="Codex Swap Account overlay inside the Codex desktop app" width="100%">
 </p>
 
 > [!IMPORTANT]
@@ -68,7 +68,7 @@ The app runs quietly in the system tray and only shows the overlay when a verifi
 Switch profiles instantly with one click.
 
 <p align="center">
-  <img src="docs/images/en/expanded-mode.png" alt="Expanded account switcher" width="820">
+  <img src="docs/images/en/expanded-mode.jpg" alt="Expanded account switcher" width="820">
 </p>
 
 ### Compact mode
@@ -92,7 +92,7 @@ Add profiles, open profile management, change settings, or hide the switcher.
 Choose the display mode, position, scale, and animation behavior.
 
 <p align="center">
-  <img src="docs/images/en/settings-appearance.png" alt="Appearance settings" width="900">
+  <img src="docs/images/en/settings-appearance.jpg" alt="Appearance settings" width="900">
 </p>
 
 ### Profile management
@@ -100,7 +100,7 @@ Choose the display mode, position, scale, and animation behavior.
 Create, organize, and manage local Codex profiles.
 
 <p align="center">
-  <img src="docs/images/en/settings-profiles.png" alt="Profile management settings" width="900">
+  <img src="docs/images/en/settings-profiles.jpg" alt="Profile management settings" width="900">
 </p>
 
 ---
@@ -462,3 +462,4 @@ Distributed under the [MIT License](LICENSE).
 Codex Swap Account is an unofficial community project and is not affiliated with, endorsed by, or sponsored by OpenAI.
 
 OpenAI and Codex are trademarks of their respective owner. This project provides a local companion interface and does not modify the official Codex installation.
+
