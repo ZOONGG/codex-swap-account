@@ -148,22 +148,6 @@ SHA256SUMS.txt
 
 The application remains in the system tray. Closing the settings window does not exit the background process.
 
-### Русский — быстрый старт
-
-<details>
-<summary>Открыть инструкцию</summary>
-
-1. Скачайте `CodexProfileOverlay-win-x64-portable.zip` из раздела [Releases](https://github.com/ZOONGG/codex-swap-account/releases/latest).
-2. Распакуйте архив.
-3. Запустите `CodexProfileOverlay.exe`.
-4. Откройте Codex.
-5. Нажмите **Добавить профиль** и войдите в нужные аккаунты.
-6. Переключайтесь через панель, меню в трее или горячие клавиши.
-
-Приложение работает локально, не отправляет токены и сохраняет общими ваши чаты, проекты и настройки Codex.
-
-</details>
-
 ## Default hotkeys
 
 | Action | Default shortcut |
