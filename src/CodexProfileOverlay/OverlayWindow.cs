@@ -38,6 +38,7 @@ internal sealed class OverlayWindow : Window
     {
         this.settings = settings;
         this.logger = logger;
+        Icon = AppIcons.WindowIcon;
         Width = 520;
         SizeToContent = SizeToContent.Height;
         WindowStyle = WindowStyle.None;

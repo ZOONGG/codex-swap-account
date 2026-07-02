@@ -10,33 +10,53 @@ if ([string]::IsNullOrWhiteSpace($Source)) {
     $Source = Join-Path $repo "artifacts\publish"
 }
 
-if (-not (Test-Path -LiteralPath (Join-Path $Source "CodexProfileOverlay.exe"))) {
+$sourceExe = Join-Path $Source "CodexProfileOverlay.exe"
+if (-not (Test-Path -LiteralPath $sourceExe)) {
     throw "CodexProfileOverlay.exe was not found in $Source. Run .\publish.ps1 first."
 }
+$Source = Split-Path -Parent (Resolve-Path -LiteralPath $sourceExe).Path
 
 $installRoot = Join-Path $env:LOCALAPPDATA "CodexProfileOverlay"
 $shortcutDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-$shortcut = Join-Path $shortcutDir "Codex Profile Overlay.lnk"
+$startMenuShortcut = Join-Path $shortcutDir "Codex Profile Overlay.lnk"
+$desktopShortcut = Join-Path ([Environment]::GetFolderPath("DesktopDirectory")) "Codex Profile Overlay.lnk"
 
 Get-Process CodexProfileOverlay -ErrorAction SilentlyContinue | Stop-Process -Force
 New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
-Copy-Item -LiteralPath (Join-Path $Source "*") -Destination $installRoot -Recurse -Force
+Copy-Item -Path (Join-Path $Source "*") -Destination $installRoot -Recurse -Force
 
-$shell = New-Object -ComObject WScript.Shell
-$link = $shell.CreateShortcut($shortcut)
-$link.TargetPath = Join-Path $installRoot "CodexProfileOverlay.exe"
-$link.WorkingDirectory = $installRoot
-$link.Description = "Codex Profile Overlay"
-$link.Save()
+function New-CodexProfileOverlayShortcut {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Target
+    )
+
+    $directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($Path)
+    $link.TargetPath = $Target
+    $link.WorkingDirectory = Split-Path -Parent $Target
+    $link.Description = "Codex Profile Overlay"
+    $link.IconLocation = "$Target,0"
+    $link.Save()
+}
+
+$installedExe = Join-Path $installRoot "CodexProfileOverlay.exe"
+New-CodexProfileOverlayShortcut -Path $startMenuShortcut -Target $installedExe
+New-CodexProfileOverlayShortcut -Path $desktopShortcut -Target $installedExe
 
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 if ($StartWithWindows) {
     New-Item -Path $runKey -Force | Out-Null
-    Set-ItemProperty -Path $runKey -Name "CodexProfileOverlay" -Value ('"{0}"' -f (Join-Path $installRoot "CodexProfileOverlay.exe"))
+    Set-ItemProperty -Path $runKey -Name "CodexProfileOverlay" -Value ('"{0}"' -f $installedExe)
 }
 
 if ($Launch) {
-    Start-Process -FilePath (Join-Path $installRoot "CodexProfileOverlay.exe")
+    Start-Process -FilePath $installedExe
 }
 
 Write-Host "Installed to $installRoot"

@@ -70,6 +70,7 @@ internal sealed class SettingsWindow : Window
         this.exitApplication = exitApplication;
 
         Title = "Codex Profile Overlay";
+        Icon = AppIcons.WindowIcon;
         MinWidth = 900;
         MinHeight = 620;
         Background = Brush("WindowBackgroundBrush");

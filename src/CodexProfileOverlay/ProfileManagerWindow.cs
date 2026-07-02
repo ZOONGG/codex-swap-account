@@ -46,6 +46,7 @@ internal sealed class ProfileManagerWindow : Window
         this.refreshProfiles = refreshProfiles;
 
         Title = localizer["ManageProfiles"];
+        Icon = AppIcons.WindowIcon;
         Width = 720;
         Height = 620;
         MinWidth = 640;

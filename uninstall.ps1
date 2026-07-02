@@ -4,12 +4,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 $installRoot = Join-Path $env:LOCALAPPDATA "CodexProfileOverlay"
-$shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Codex Profile Overlay.lnk"
+$startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Codex Profile Overlay.lnk"
+$desktopShortcut = Join-Path ([Environment]::GetFolderPath("DesktopDirectory")) "Codex Profile Overlay.lnk"
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 
 Get-Process CodexProfileOverlay -ErrorAction SilentlyContinue | Stop-Process -Force
-if (Test-Path -LiteralPath $shortcut) {
-    Remove-Item -LiteralPath $shortcut -Force
+foreach ($shortcut in @($startMenuShortcut, $desktopShortcut)) {
+    if (Test-Path -LiteralPath $shortcut) {
+        Remove-Item -LiteralPath $shortcut -Force
+    }
 }
 if (Test-Path -LiteralPath $runKey) {
     Remove-ItemProperty -Path $runKey -Name "CodexProfileOverlay" -ErrorAction SilentlyContinue

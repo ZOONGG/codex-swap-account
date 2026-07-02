@@ -14,6 +14,7 @@ internal sealed class PromptDialog : Window
     private PromptDialog(string title, string label, string initialValue, string primaryText, string cancelText)
     {
         Title = title;
+        Icon = AppIcons.WindowIcon;
         Width = 460;
         Height = 224;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;

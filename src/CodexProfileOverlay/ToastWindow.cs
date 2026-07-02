@@ -11,6 +11,7 @@ internal sealed class ToastWindow : Window
 {
     private ToastWindow(string message, bool isError)
     {
+        Icon = AppIcons.WindowIcon;
         Width = 360;
         Height = 42;
         WindowStyle = WindowStyle.None;

@@ -9,7 +9,12 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\AppIcon.ico" />
+    <Resource Include="Assets\AppIcon.png" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\CodexProfileOverlay.Core\CodexProfileOverlay.Core.csproj" />
   </ItemGroup>
