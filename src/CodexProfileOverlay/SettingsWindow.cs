@@ -79,6 +79,7 @@ internal sealed class SettingsWindow : Window
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
         WindowStartupLocation = WindowStartupLocation.Manual;
+        WindowCaptionThemeService.Apply(this, settings.Theme);
         ApplySavedGeometry();
 
         Content = BuildShell();
@@ -115,6 +116,7 @@ internal sealed class SettingsWindow : Window
     {
         Background = Brush("WindowBackgroundBrush");
         Foreground = Brush("StrongTextBrush");
+        WindowCaptionThemeService.Apply(this, settings.Theme);
         if (sidebarPanel is not null)
         {
             sidebarPanel.Background = Brush("Surface1Brush");

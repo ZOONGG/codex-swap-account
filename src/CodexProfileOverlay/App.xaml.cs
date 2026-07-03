@@ -26,11 +26,11 @@ public partial class App : Application
         ["SuccessBrush"] = "#2DD4A3",
         ["ErrorBrush"] = "#F05D6C",
         ["InputBackgroundBrush"] = "#101014",
-        ["OverlayBackgroundBrush"] = "#141417",
-        ["OverlayBorderBrush"] = "#303038",
-        ["TabBackgroundBrush"] = "#1B1B20",
-        ["TabHoverBrush"] = "#24242B",
-        ["TabActiveBrush"] = "#2B2440",
+        ["OverlayBackgroundBrush"] = "#000000",
+        ["OverlayBorderBrush"] = "#17171B",
+        ["TabBackgroundBrush"] = "#111114",
+        ["TabHoverBrush"] = "#1A1A1F",
+        ["TabActiveBrush"] = "#241B38",
     };
 
     private static readonly IReadOnlyDictionary<string, string> LightTheme = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -73,6 +73,8 @@ public partial class App : Application
                 Current.Resources[key] = new SolidColorBrush(color);
             }
         }
+
+        WindowCaptionThemeService.ApplyToOpenWindows(theme);
     }
 
     protected override void OnStartup(StartupEventArgs e)

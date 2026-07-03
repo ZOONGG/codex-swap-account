@@ -93,7 +93,6 @@ internal sealed class OverlayController : IDisposable
         {
             visibilityState.RevealManually();
             overlayWindow?.Show();
-            ShowSettingsWindow();
             Tick();
         });
     }
@@ -270,7 +269,11 @@ internal sealed class OverlayController : IDisposable
         }
 
         switching = true;
-        overlayWindow?.SetSwitching(true);
+        EnsureOverlay();
+        overlayWindow!.Hide();
+        overlayWindow.AllowAutoShow = false;
+        trayIcon?.UpdateOverlayState(false);
+        overlayWindow.SetSwitching(true);
         hotkeyManager?.Clear();
         overlayWindow?.ShowNotification(localizer.Format("SwitchingToProfile", profileName));
         try
@@ -308,6 +311,11 @@ internal sealed class OverlayController : IDisposable
         {
             switching = false;
             overlayWindow?.SetSwitching(false);
+            if (overlayWindow is not null)
+            {
+                overlayWindow.AllowAutoShow = true;
+            }
+
             _ = RegisterHotkeys();
             Tick();
         }
@@ -538,6 +546,7 @@ internal sealed class OverlayController : IDisposable
         App.ApplyTheme(settings.Theme);
         overlayWindow?.ApplySettings();
         settingsWindow?.RefreshTheme();
+        profileManagerWindow?.RefreshTheme();
         trayIcon?.UpdateStartWithWindows(settings.StartWithWindows);
         _ = RegisterHotkeys();
     }
@@ -588,6 +597,7 @@ internal sealed class OverlayController : IDisposable
         App.ApplyTheme(settings.Theme);
         overlayWindow?.ApplySettings();
         settingsWindow?.RefreshTheme();
+        profileManagerWindow?.RefreshTheme();
         RefreshProfiles();
     }
 

@@ -17,11 +17,11 @@
         <SolidColorBrush x:Key="SuccessBrush" Color="#2DD4A3" />
         <SolidColorBrush x:Key="ErrorBrush" Color="#F05D6C" />
         <SolidColorBrush x:Key="InputBackgroundBrush" Color="#101014" />
-        <SolidColorBrush x:Key="OverlayBackgroundBrush" Color="#141417" />
-        <SolidColorBrush x:Key="OverlayBorderBrush" Color="#303038" />
-        <SolidColorBrush x:Key="TabBackgroundBrush" Color="#1B1B20" />
-        <SolidColorBrush x:Key="TabHoverBrush" Color="#24242B" />
-        <SolidColorBrush x:Key="TabActiveBrush" Color="#2B2440" />
+        <SolidColorBrush x:Key="OverlayBackgroundBrush" Color="#000000" />
+        <SolidColorBrush x:Key="OverlayBorderBrush" Color="#17171B" />
+        <SolidColorBrush x:Key="TabBackgroundBrush" Color="#111114" />
+        <SolidColorBrush x:Key="TabHoverBrush" Color="#1A1A1F" />
+        <SolidColorBrush x:Key="TabActiveBrush" Color="#241B38" />
 
         <Style TargetType="{x:Type ToolTip}">
             <Setter Property="Foreground" Value="{DynamicResource StrongTextBrush}" />

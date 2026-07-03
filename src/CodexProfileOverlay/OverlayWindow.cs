@@ -346,6 +346,7 @@ internal sealed class OverlayWindow : Window
 
         panel.Children.Add(new Separator { Margin = new Thickness(2, 5, 2, 5) });
         panel.Children.Add(CreatePopupCommand(Localizer?["AddProfile"] ?? "Add profile", OnAddProfile));
+        panel.Children.Add(CreatePopupCommand(Localizer?["Refresh"] ?? "Refresh", OnRefreshProfiles));
         panel.Children.Add(CreatePopupCommand(Localizer?["ManageProfiles"] ?? "Manage profiles", OnManageProfiles));
         panel.Children.Add(CreatePopupCommand(Localizer?["Settings"] ?? "Settings", OnOpenSettings));
         panel.Children.Add(CreatePopupCommand(Localizer?["HideSwitcher"] ?? "Hide switcher", OnHideOverlay));
@@ -460,6 +461,7 @@ internal sealed class OverlayWindow : Window
             UseLayoutRounding = true,
         };
         menu.Items.Add(CreateMenuItem(Localizer?["AddProfile"] ?? "Add profile", () => OnAddProfile?.Invoke()));
+        menu.Items.Add(CreateMenuItem(Localizer?["Refresh"] ?? "Refresh", () => OnRefreshProfiles?.Invoke()));
         menu.Items.Add(CreateMenuItem(Localizer?["ManageProfiles"] ?? "Manage profiles", () => OnManageProfiles?.Invoke()));
         menu.Items.Add(CreateMenuItem(Localizer?["Settings"] ?? "Settings", () => OnOpenSettings?.Invoke()));
         menu.Items.Add(CreateMenuItem(Localizer?["HideSwitcher"] ?? "Hide switcher", () => OnHideOverlay?.Invoke()));

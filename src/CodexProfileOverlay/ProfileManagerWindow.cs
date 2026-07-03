@@ -57,6 +57,7 @@ internal sealed class ProfileManagerWindow : Window
         FontSize = 15;
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
+        WindowCaptionThemeService.ApplyCurrent(this);
 
         Content = BuildShell(addProfile);
         localizer.LanguageChanged += Rebuild;
@@ -68,6 +69,14 @@ internal sealed class ProfileManagerWindow : Window
     {
         profiles = newProfiles;
         activeProfile = newActiveProfile;
+        Rebuild();
+    }
+
+    public void RefreshTheme()
+    {
+        Background = Brush("WindowBackgroundBrush");
+        Foreground = Brush("StrongTextBrush");
+        WindowCaptionThemeService.ApplyCurrent(this);
         Rebuild();
     }
 
