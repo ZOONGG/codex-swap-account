@@ -2,6 +2,7 @@ using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using CodexProfileOverlay.Core.Models;
 using CodexProfileOverlay.Core.Services;
 using Application = System.Windows.Application;
@@ -81,6 +82,46 @@ public partial class App : Application
     {
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+        if (e.Args.Contains("--support-visual-qa", StringComparer.OrdinalIgnoreCase))
+        {
+            AppTheme theme = e.Args.Contains("--light", StringComparer.OrdinalIgnoreCase)
+                ? AppTheme.Light
+                : AppTheme.Dark;
+            LanguagePreference language = e.Args.Contains("--ru", StringComparer.OrdinalIgnoreCase)
+                ? LanguagePreference.Russian
+                : LanguagePreference.English;
+            ApplyTheme(theme);
+            var supportWindow = new SupportWindow(theme, language) { ShowInTaskbar = true };
+            string? outputPath = ArgumentValue(e.Args, "--output=");
+            double dpi = double.TryParse(
+                ArgumentValue(e.Args, "--dpi="),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double requestedDpi)
+                ? Math.Clamp(requestedDpi, 96, 192)
+                : 96;
+            string visualState = ArgumentValue(e.Args, "--state=") ?? "methods";
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                supportWindow.ShowInTaskbar = false;
+                supportWindow.ContentRendered += async (_, _) =>
+                {
+                    await Task.Delay(2000);
+                    await supportWindow.ApplyVisualQaStateAsync(visualState);
+                    await supportWindow.Dispatcher.InvokeAsync(
+                        static () => { },
+                        System.Windows.Threading.DispatcherPriority.Render);
+                    RenderSupportPreview(supportWindow, outputPath, dpi);
+                    supportWindow.Close();
+                };
+            }
+
+            MainWindow = supportWindow;
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            supportWindow.Show();
+            return;
+        }
 
         const string mutexName = "Local\\CodexProfileOverlay";
         const string activationEventName = "Local\\CodexProfileOverlay.Activate";
@@ -173,5 +214,38 @@ public partial class App : Application
             Name = "Single instance activation listener",
         };
         activationThread.Start();
+    }
+
+    private static string? ArgumentValue(IEnumerable<string> arguments, string prefix) =>
+        arguments.FirstOrDefault(argument => argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?[prefix.Length..];
+
+    private static void RenderSupportPreview(Window window, string outputPath, double dpi)
+    {
+        if (window.Content is not FrameworkElement content || content.ActualWidth <= 0 || content.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        string fullPath = Path.GetFullPath(outputPath);
+        string? directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        double scale = dpi / 96;
+        double renderWidth = content.ActualWidth + content.Margin.Left + content.Margin.Right;
+        double renderHeight = content.ActualHeight + content.Margin.Top + content.Margin.Bottom;
+        var bitmap = new RenderTargetBitmap(
+            (int)Math.Ceiling(renderWidth * scale),
+            (int)Math.Ceiling(renderHeight * scale),
+            dpi,
+            dpi,
+            PixelFormats.Pbgra32);
+        bitmap.Render(content);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using FileStream stream = File.Create(fullPath);
+        encoder.Save(stream);
     }
 }

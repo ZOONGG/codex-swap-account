@@ -1,0 +1,387 @@
+<Window x:Class="CodexProfileOverlay.SupportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+        Title="Support Codex Swap Account"
+        Width="700" Height="760" MinWidth="580" MinHeight="500"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource StrongTextBrush}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <Style x:Key="SupportOutlineButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource StrongTextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource Surface2Brush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="MinHeight" Value="42"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid Margin="1" SnapsToDevicePixels="True" UseLayoutRounding="True">
+                            <Border x:Name="Surface" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="10" Padding="{TemplateBinding Padding}"
+                                    SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource HoverSurfaceBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource PressedSurfaceBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SupportPrimaryButton" TargetType="Button" BasedOn="{StaticResource SupportOutlineButton}">
+            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="MinWidth" Value="128"/>
+        </Style>
+
+        <Style x:Key="SupportCloseButton" TargetType="Button" BasedOn="{StaticResource SupportOutlineButton}">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+        </Style>
+
+        <Style x:Key="SupportAmountSelector" TargetType="RadioButton">
+            <Setter Property="Height" Value="50"/>
+            <Setter Property="MinWidth" Value="112"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="Margin" Value="0,0,10,10"/>
+            <Setter Property="Foreground" Value="{DynamicResource StrongTextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource Surface2Brush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid Margin="1" SnapsToDevicePixels="True" UseLayoutRounding="True">
+                            <Border x:Name="Surface" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                    CornerRadius="10" Padding="{TemplateBinding Padding}"
+                                    SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource HoverSurfaceBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource TabActiveBrush}"/>
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Border Background="{DynamicResource Surface1Brush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                CornerRadius="14" Padding="26" SnapsToDevicePixels="True"
+                UseLayoutRounding="True">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="22"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="58"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="42"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Width="44" Height="44" CornerRadius="13"
+                            Background="{DynamicResource TabActiveBrush}"
+                            HorizontalAlignment="Left" SnapsToDevicePixels="True">
+                        <Viewbox Width="22" Height="22">
+                            <Path Fill="{DynamicResource ErrorBrush}"
+                                  Data="M12,21 L3,12 C-3,5 6,-1 12,6 C18,-1 27,5 21,12 Z"/>
+                        </Viewbox>
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock x:Name="SupportTitle" FontSize="20" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="SupportSubtitle" Foreground="{DynamicResource MutedTextBrush}"
+                                   FontSize="12" Margin="0,4,0,0"/>
+                    </StackPanel>
+                    <Button x:Name="CloseButton" Grid.Column="2" Style="{StaticResource SupportCloseButton}"
+                            Click="CloseButton_Click" automation:AutomationProperties.Name="Close support">
+                        <Canvas Width="16" Height="16" SnapsToDevicePixels="True">
+                            <Path Data="M4,4 L12,12 M12,4 L4,12"
+                                  Stroke="{DynamicResource MutedTextBrush}" StrokeThickness="2"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        </Canvas>
+                    </Button>
+                </Grid>
+
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                    <Grid Margin="2" MinHeight="330">
+                        <StackPanel x:Name="LoadingPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ProgressBar Width="190" Height="4" IsIndeterminate="True"/>
+                            <TextBlock x:Name="LoadingText" Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="0,14,0,0" HorizontalAlignment="Center"/>
+                        </StackPanel>
+
+                        <Grid x:Name="MethodsPanel" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="16"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="IntroText" Foreground="{DynamicResource MutedTextBrush}"
+                                       TextWrapping="Wrap"/>
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="TelegramMethodButton" Height="98" Padding="16"
+                                        Style="{StaticResource SupportOutlineButton}"
+                                        HorizontalContentAlignment="Stretch"
+                                        Click="TelegramMethodButton_Click">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="50"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="40" Height="40" CornerRadius="20"
+                                                Background="{DynamicResource TabActiveBrush}">
+                                            <TextBlock Text="★" Foreground="#F5B82E" FontSize="23"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock x:Name="TelegramMethodTitle" FontWeight="SemiBold" FontSize="15"/>
+                                            <TextBlock x:Name="TelegramMethodHint" Foreground="{DynamicResource MutedTextBrush}"
+                                                       FontSize="11" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                                <Button x:Name="CryptoMethodButton" Grid.Column="2" Height="98" Padding="16"
+                                        Style="{StaticResource SupportOutlineButton}"
+                                        HorizontalContentAlignment="Stretch"
+                                        Click="CryptoMethodButton_Click">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="50"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="40" Height="40" CornerRadius="20"
+                                                Background="{DynamicResource TabActiveBrush}">
+                                            <TextBlock Text="₿" Foreground="{DynamicResource AccentBrush}" FontSize="22"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock x:Name="CryptoMethodTitle" FontWeight="SemiBold" FontSize="15"/>
+                                            <TextBlock x:Name="CryptoMethodHint" Foreground="{DynamicResource MutedTextBrush}"
+                                                       FontSize="11" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                            </Grid>
+                        </Grid>
+
+                        <Grid x:Name="AmountPanel" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock x:Name="ChooseAmountTitle" FontSize="18" FontWeight="SemiBold"/>
+                                <WrapPanel x:Name="PresetPanel" Margin="0,18,0,8"/>
+                                <TextBlock x:Name="CustomAmountLabel" Foreground="{DynamicResource MutedTextBrush}"
+                                           FontSize="12" FontWeight="SemiBold"/>
+                                <Grid Margin="0,8,0,0">
+                                    <TextBox x:Name="CustomAmountTextBox" Height="50" Padding="14,10,48,10"
+                                             TextChanged="CustomAmountTextBox_TextChanged"
+                                             LostKeyboardFocus="CustomAmountTextBox_LostKeyboardFocus"
+                                             KeyDown="CustomAmountTextBox_KeyDown"/>
+                                    <TextBlock x:Name="AmountSuffixText" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Margin="0,0,16,0" FontSize="18" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource AccentBrush}" IsHitTestVisible="False"/>
+                                </Grid>
+                                <TextBlock x:Name="AmountValidationText" Foreground="{DynamicResource ErrorBrush}"
+                                           FontSize="12" MinHeight="18" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <CheckBox x:Name="TermsCheckBox" Margin="0,12,0,0"
+                                          Checked="TermsCheckBox_Changed" Unchecked="TermsCheckBox_Changed">
+                                    <TextBlock x:Name="TermsText" TextWrapping="Wrap"/>
+                                </CheckBox>
+                                <TextBlock x:Name="TermsHint" Foreground="{DynamicResource MutedTextBrush}"
+                                           FontSize="11" Margin="32,6,0,0" TextWrapping="Wrap"/>
+                                <Grid Margin="0,22,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="10"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="BackToMethodsButton" Grid.Column="1" Style="{StaticResource SupportOutlineButton}"
+                                            Click="BackToMethodsButton_Click"/>
+                                    <Button x:Name="ContinueButton" Grid.Column="3" Style="{StaticResource SupportPrimaryButton}"
+                                            IsDefault="True" IsEnabled="False" Click="ContinueButton_Click"/>
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid x:Name="AssetPanel" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="14"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="16"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock x:Name="ChooseAssetTitle" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="ChooseAssetHint" Foreground="{DynamicResource MutedTextBrush}"
+                                           FontSize="12" Margin="0,5,0,0"/>
+                            </StackPanel>
+                            <Grid x:Name="AssetButtons" Grid.Row="2"/>
+                            <Button x:Name="BackToAmountButton" Grid.Row="4" HorizontalAlignment="Left"
+                                    Style="{StaticResource SupportOutlineButton}" Click="BackToAmountButton_Click"/>
+                        </Grid>
+
+                        <Grid x:Name="CheckoutPanel" Visibility="Collapsed">
+                            <StackPanel HorizontalAlignment="Center">
+                                <TextBlock x:Name="CheckoutMethodText" FontSize="15" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0" HorizontalAlignment="Center">
+                                    <TextBlock x:Name="CheckoutAmountText" FontSize="27" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource AccentBrush}"/>
+                                    <TextBlock x:Name="CheckoutAmountSuffix" FontSize="22" Margin="7,2,0,0"
+                                               Foreground="{DynamicResource AccentBrush}"/>
+                                </StackPanel>
+                                <Border x:Name="QrFrame" Width="248" Height="248" Margin="0,16,0,0"
+                                        Background="White" CornerRadius="16" Padding="14"
+                                        SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                    <Image x:Name="QrImage" Stretch="Uniform"
+                                           RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                           automation:AutomationProperties.Name="Payment checkout QR code"/>
+                                </Border>
+                                <TextBlock x:Name="ScanText" Foreground="{DynamicResource MutedTextBrush}"
+                                           Margin="0,11,0,0" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="440"/>
+                                <Button x:Name="OpenTelegramButton" Width="280" Margin="0,18,0,0"
+                                        Style="{StaticResource SupportPrimaryButton}"
+                                        Click="OpenTelegramButton_Click"/>
+                                <StackPanel x:Name="CryptoDetailsPanel" Visibility="Collapsed" Width="470" Margin="0,14,0,0">
+                                    <Border Background="{DynamicResource Surface2Brush}"
+                                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                            CornerRadius="12" Padding="14,9" SnapsToDevicePixels="True">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="48"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock x:Name="AddressLabel" Foreground="{DynamicResource MutedTextBrush}" FontSize="10"/>
+                                                <TextBlock x:Name="AddressText" FontFamily="Cascadia Mono, Consolas"
+                                                           FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,4,10,0"/>
+                                            </StackPanel>
+                                            <Button x:Name="CopyAddressButton" Grid.Column="1" Width="38" Height="38"
+                                                    Style="{StaticResource SupportOutlineButton}" Padding="0"
+                                                    Click="CopyAddressButton_Click">
+                                                <Viewbox Width="16" Height="16">
+                                                    <Path Data="M8,8 H19 V19 H8 Z M5,5 H16 V8 M5,5 V16 H8"
+                                                          Stroke="{DynamicResource AccentBrush}" StrokeThickness="1.7"
+                                                          Fill="Transparent" StrokeStartLineCap="Round"
+                                                          StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                                                </Viewbox>
+                                            </Button>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock x:Name="NetworkWarningText" Foreground="{DynamicResource ErrorBrush}"
+                                               FontSize="11" TextWrapping="Wrap" TextAlignment="Center" Margin="6,8,6,0"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,18,0,0" HorizontalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <Ellipse Width="7" Height="7" Fill="{DynamicResource AccentBrush}" Margin="0,0,9,0"/>
+                                        <TextBlock x:Name="WaitingText" Foreground="{DynamicResource MutedTextBrush}" FontSize="13"/>
+                                    </StackPanel>
+                                    <ProgressBar Width="220" Height="3" Margin="0,9,0,0" IsIndeterminate="True"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel x:Name="SuccessPanel" Visibility="Collapsed" HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" MaxWidth="440">
+                            <Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource TabActiveBrush}"
+                                    SnapsToDevicePixels="True">
+                                <Viewbox Width="34" Height="34">
+                                    <Path Fill="{DynamicResource ErrorBrush}"
+                                          Data="M12,21 L3,12 C-3,5 6,-1 12,6 C18,-1 27,5 21,12 Z"/>
+                                </Viewbox>
+                            </Border>
+                            <TextBlock x:Name="ThankYouTitle" FontSize="25" FontWeight="SemiBold"
+                                       Margin="0,24,0,0" TextAlignment="Center"/>
+                            <Border Margin="0,16,0,0" Padding="14,7" Background="{DynamicResource TabActiveBrush}"
+                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" CornerRadius="18"
+                                    HorizontalAlignment="Center" SnapsToDevicePixels="True">
+                                <TextBlock x:Name="ThankYouAmountText" FontSize="18" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AccentBrush}"/>
+                            </Border>
+                            <TextBlock x:Name="ThankYouText" Foreground="{DynamicResource MutedTextBrush}"
+                                       FontSize="14" LineHeight="22" Margin="0,20,0,0"
+                                       TextAlignment="Center" TextWrapping="Wrap"/>
+                            <Button x:Name="DoneButton" Width="160" Margin="0,28,0,0"
+                                    Style="{StaticResource SupportPrimaryButton}" IsDefault="True"
+                                    Click="CloseButton_Click"/>
+                        </StackPanel>
+
+                        <StackPanel x:Name="TerminalPanel" Visibility="Collapsed" HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" MaxWidth="470">
+                            <Border Width="58" Height="58" CornerRadius="29" Background="{DynamicResource TabActiveBrush}"
+                                    SnapsToDevicePixels="True">
+                                <TextBlock Text="!" FontSize="27" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource ErrorBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock x:Name="TerminalTitle" FontSize="20" FontWeight="SemiBold"
+                                       Margin="0,16,0,0" TextAlignment="Center" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="TerminalText" Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="0,7,0,0" TextAlignment="Center" TextWrapping="Wrap"/>
+                            <Button x:Name="CreateNewButton" Margin="0,22,0,0"
+                                    Style="{StaticResource SupportPrimaryButton}" Click="CreateNewButton_Click"/>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <Border x:Name="CopyToast" Panel.ZIndex="20" Visibility="Collapsed" IsHitTestVisible="False"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,28"
+                Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1" CornerRadius="10" Padding="14,8"
+                SnapsToDevicePixels="True" UseLayoutRounding="True">
+            <TextBlock x:Name="CopyToastText" FontSize="12" FontWeight="SemiBold"/>
+        </Border>
+    </Grid>
+</Window>

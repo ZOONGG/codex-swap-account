@@ -9,5 +9,6 @@
     <InformationalVersion>1.0.0</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>Codex Swap Account</Product>
+    <CodexSwapSupportApiBaseUrl Condition="'$(CodexSwapSupportApiBaseUrl)' == '' and '$(Configuration)' == 'Release'">https://support-backend-production-8891.up.railway.app</CodexSwapSupportApiBaseUrl>
   </PropertyGroup>
 </Project>

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -38,6 +39,8 @@ internal sealed class SettingsWindow : Window
     private readonly StackPanel navPanel = new();
     private Border? sidebarPanel;
     private Button? themeButton;
+    private Button? githubButton;
+    private Button? supportButton;
     private string hotkeyConflictMessage = string.Empty;
     private TextBlock? hotkeyConflictText;
     private IReadOnlyList<ProfileInfo> profiles;
@@ -84,7 +87,7 @@ internal sealed class SettingsWindow : Window
         this.resetSettings = resetSettings;
         this.exitApplication = exitApplication;
 
-        Title = "Codex Profile Overlay";
+        Title = "Codex Swap Account";
         Icon = AppIcons.WindowIcon;
         MinWidth = 900;
         MinHeight = 620;
@@ -173,9 +176,21 @@ internal sealed class SettingsWindow : Window
         pageTitle.VerticalAlignment = VerticalAlignment.Center;
         header.Children.Add(pageTitle);
 
+        var headerActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        githubButton = new Button { MinWidth = 92, Margin = new Thickness(0, 0, 8, 0) };
+        githubButton.Click += (_, _) => OpenExternalUrl("https://github.com/ZOONGG/codex-swap-account");
+        headerActions.Children.Add(githubButton);
+        supportButton = new Button { MinWidth = 110, Margin = new Thickness(0, 0, 8, 0) };
+        supportButton.Click += (_, _) => OpenSupport();
+        headerActions.Children.Add(supportButton);
         themeButton = CreateThemeButton();
-        Grid.SetColumn(themeButton, 1);
-        header.Children.Add(themeButton);
+        headerActions.Children.Add(themeButton);
+        Grid.SetColumn(headerActions, 1);
+        header.Children.Add(headerActions);
         main.Children.Add(header);
 
         var scroll = new ScrollViewer
@@ -231,6 +246,7 @@ internal sealed class SettingsWindow : Window
 
             pageTitle.Text = PageName(page);
             pageTitle.Foreground = Brush("StrongTextBrush");
+            UpdateHeaderButtons();
             UpdateThemeButton();
             contentHost.Children.Clear();
             contentHost.Children.Add(page switch
@@ -292,6 +308,58 @@ internal sealed class SettingsWindow : Window
             Save();
         };
         return button;
+    }
+
+    private void UpdateHeaderButtons()
+    {
+        if (githubButton is not null)
+        {
+            githubButton.Content = "GitHub";
+            githubButton.ToolTip = "https://github.com/ZOONGG/codex-swap-account";
+        }
+
+        if (supportButton is not null)
+        {
+            var content = new StackPanel { Orientation = Orientation.Horizontal };
+            content.Children.Add(new Viewbox
+            {
+                Width = 16,
+                Height = 16,
+                Margin = new Thickness(0, 0, 7, 0),
+                Child = new System.Windows.Shapes.Path
+                {
+                    Data = Geometry.Parse("M12,21 L3,12 C-3,5 6,-1 12,6 C18,-1 27,5 21,12 Z"),
+                    Fill = Brush("ErrorBrush"),
+                    Stretch = Stretch.Uniform,
+                },
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "Поддержать" : "Support",
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            supportButton.Content = content;
+            supportButton.ToolTip = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian
+                ? "Поддержать развитие Codex Swap Account"
+                : "Support Codex Swap Account development";
+        }
+    }
+
+    private void OpenSupport()
+    {
+        var support = new SupportWindow(settings.Theme, localizer.Language) { Owner = this };
+        _ = support.ShowDialog();
+    }
+
+    private static void OpenExternalUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+        }
     }
 
     private void UpdateThemeButton()
