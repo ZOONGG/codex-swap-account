@@ -324,13 +324,24 @@ internal sealed class OverlayController : IDisposable
             overlayWindow.ShowNotification(localizer.Format("SwitchingToProfile", profileName));
 
             bool allowForceClose = settings.ForceCloseFallback;
-            await processService.CloseCodexAsync(settings.GracefulCloseTimeoutSeconds, allowForceClose, disposalTokenSource.Token).ConfigureAwait(true);
+            CodexDesktopProcessSession? shutdownSession = null;
+            PreparedCodexLaunch? launchTarget;
+            try
+            {
+                launchTarget = await CodexSwitchPreparation.PrepareAndCloseAsync(settings.LaunchCodexAfterSwitching,
+                    () => processService.PrepareLaunchAsync(disposalTokenSource.Token),
+                    async () => shutdownSession = await processService.CloseCodexAsync(settings.GracefulCloseTimeoutSeconds,
+                        allowForceClose, disposalTokenSource.Token).ConfigureAwait(true), disposalTokenSource.Token).ConfigureAwait(true);
+            }
+            catch { shutdownSession?.Dispose(); throw; }
+            using var completedShutdown = shutdownSession;
             MigrateLegacyProfileStateSafely();
+            CodexShutdownCoordinator.VerifyStopped(completedShutdown!, disposalTokenSource.Token);
             switchResult = await switchService.SwitchAsync(profileName, disposalTokenSource.Token).ConfigureAwait(true);
             RefreshProfiles();
             if (settings.LaunchCodexAfterSwitching)
             {
-                await LaunchCodexAndWaitAsync(disposalTokenSource.Token, throwOnFailure: true).ConfigureAwait(true);
+                await LaunchCodexAndWaitAsync(disposalTokenSource.Token, throwOnFailure: true, launchTarget).ConfigureAwait(true);
             }
 
             overlayWindow?.ShowNotification(localizer.Format("SwitchedToAccount", profileName));
@@ -968,7 +979,7 @@ internal sealed class OverlayController : IDisposable
         return processId == codexWindow.ProcessId || processId == Environment.ProcessId;
     }
 
-    private async Task LaunchCodexAndWaitAsync(CancellationToken cancellationToken, bool throwOnFailure = false)
+    private async Task LaunchCodexAndWaitAsync(CancellationToken cancellationToken, bool throwOnFailure = false, PreparedCodexLaunch? launchTarget = null)
     {
         try
         {
@@ -983,7 +994,9 @@ internal sealed class OverlayController : IDisposable
                 return;
             }
 
-            processService.LaunchCodex();
+            launchTarget ??= await processService.PrepareLaunchAsync(cancellationToken).ConfigureAwait(true);
+            cancellationToken.ThrowIfCancellationRequested();
+            processService.LaunchCodex(launchTarget);
             if (!await WaitForCodexWindowAsync(cancellationToken, TimeSpan.FromSeconds(20)).ConfigureAwait(true))
             {
                 throw new InvalidOperationException("Codex window did not appear after launch.");

@@ -41,7 +41,7 @@ internal sealed class CodexWindowFinder
         }
 
         NativeMethods.GetWindowThreadProcessId(knownWindow.Hwnd, out uint processId);
-        if (processId != knownWindow.ProcessId)
+        if (processId != knownWindow.ProcessId || !WindowsDesktopProcessCatalog.IsOfficialDesktop((int)processId))
         {
             return null;
         }
@@ -96,7 +96,7 @@ internal sealed class CodexWindowFinder
         {
             using Process process = Process.GetProcessById((int)processId);
             string title = NativeMethods.GetWindowTitle(hwnd);
-            if (!IsLikelyOfficialCodexProcess(process))
+            if (!WindowsDesktopProcessCatalog.IsOfficialDesktop(process.Id))
             {
                 return null;
             }
@@ -120,28 +120,4 @@ internal sealed class CodexWindowFinder
         return result == 0 && cloaked != 0;
     }
 
-    private static bool IsLikelyOfficialCodexProcess(Process process)
-    {
-        string[] rejectedNames = ["chrome", "msedge", "firefox", "code", "devenv", "explorer", "windowsterminal", "cmd", "powershell"];
-        if (rejectedNames.Any(name => process.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase)))
-        {
-            return false;
-        }
-
-        if (process.ProcessName.Contains("Codex", StringComparison.OrdinalIgnoreCase))
-        {
-            return !process.ProcessName.Contains("Overlay", StringComparison.OrdinalIgnoreCase);
-        }
-
-        try
-        {
-            var versionInfo = process.MainModule?.FileVersionInfo;
-            return versionInfo?.FileDescription?.Contains("Codex", StringComparison.OrdinalIgnoreCase) == true
-                || versionInfo?.ProductName?.Contains("Codex", StringComparison.OrdinalIgnoreCase) == true;
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            return false;
-        }
-    }
 }

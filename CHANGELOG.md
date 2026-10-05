@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Hardened Windows Codex Desktop identity using the official package family and registered manifest executable, including packages whose desktop process is `ChatGPT.exe`.
+- Track desktop descendants with retained handles, handle respawns, and require a stable 750 ms exit before replacing authorization. Preflight registered application activation before shutdown when automatic relaunch is enabled.
+- Remove only the known stale Codex tray GUID after verified shutdown; cleanup failure logs a safe warning and does not prevent account switching.
+- Discover versioned bundled Codex CLI executables using executable metadata/semantic versions, with deterministic fallback ordering; keep the structured app-server rate-limit provider.
+- Windows desktop lifecycle and tray compatibility improvements inspired by/adapted from fixes contributed in [HYFOAM/codex-swap-account](https://github.com/HYFOAM/codex-swap-account), particularly commits `2d200c0`, `5dbfe6a`, and `881b8b7`.
+
 ## 1.0.0 - 2026-09-20
 
 - Fixed a critical storage bug caused by the former per-account state backup implementation recursively copying `sessions`, attachments, rollout JSONL files, and local databases into every `state-*` rollback directory.
