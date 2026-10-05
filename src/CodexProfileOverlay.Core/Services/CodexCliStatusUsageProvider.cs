@@ -164,41 +164,6 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
     }
 }
 
-public static class CodexCliLocator
-{
-    public static string? FindExecutable()
-    {
-        string installed = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs",
-            "OpenAI",
-            "Codex",
-            "bin",
-            "codex.exe");
-        if (File.Exists(installed))
-        {
-            return installed;
-        }
-
-        string? path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return null;
-        }
-
-        foreach (string directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            string candidate = Path.Combine(directory, "codex.exe");
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
-}
-
 public sealed record CodexRateLimitsCapture(string StatusOutput, DateTimeOffset CapturedAt, string? CodexCliVersion);
 
 public interface ICodexRateLimitsSource
