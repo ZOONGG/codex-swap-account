@@ -7,10 +7,6 @@ public static class LocalizationCatalog
 {
     private static readonly IReadOnlyDictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["TokenStatistics"] = "Token statistics",
-        ["TokenStatisticsSource"] = "Source: Official Codex account data",
-        ["TokenStatisticsDisabled"] = "Unavailable: safe account access has not been verified. Codex may refresh authorization credentials when reading usage. Statistics queries are disabled to protect existing sessions.",
-        ["TokenStatisticsMissing"] = "Lifetime tokens: —   ·   Peak daily tokens: —\nLast 7 complete days: —   ·   Last successful refresh: —",
         ["FiveHourLimit"] = "5-hour limit",
         ["WeeklyLimit"] = "Weekly limit",
         ["UsageDetails"] = "Account limits",
@@ -263,10 +259,6 @@ public static class LocalizationCatalog
 
     private static readonly IReadOnlyDictionary<string, string> Russian = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["TokenStatistics"] = "Статистика токенов",
-        ["TokenStatisticsSource"] = "Источник: официальные данные аккаунта Codex",
-        ["TokenStatisticsDisabled"] = "Недоступно: безопасный доступ к аккаунту не подтверждён. При чтении статистики Codex может обновлять данные авторизации. Запросы отключены для защиты существующих сессий.",
-        ["TokenStatisticsMissing"] = "Токенов за всё время: —   ·   Максимум за день: —\nЗа 7 полных дней: —   ·   Последнее успешное обновление: —",
         ["FiveHourLimit"] = "Лимит за 5 часов",
         ["WeeklyLimit"] = "Недельный лимит",
         ["UsageDetails"] = "Лимиты аккаунта",
