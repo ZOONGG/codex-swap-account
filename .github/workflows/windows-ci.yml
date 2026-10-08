@@ -21,6 +21,13 @@ jobs:
       - name: Repository safety scan
         shell: pwsh
         run: .\verify-repository-safety.ps1
+      - name: Ensure Inno Setup compiler
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --version=6.7.3 --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
       - name: Publish
         shell: pwsh
         run: .\publish.ps1 -Configuration Release
@@ -28,4 +35,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CodexProfileOverlay-win-x64
-          path: artifacts/CodexProfileOverlay-win-x64-portable.zip
+          path: |
+            artifacts/CodexProfileOverlay-win-x64-portable.zip
+            artifacts/CodexSwapAccount-win-x64-setup.exe
+            artifacts/SHA256SUMS.txt
