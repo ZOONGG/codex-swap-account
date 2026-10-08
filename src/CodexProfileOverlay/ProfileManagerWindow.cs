@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using CodexProfileOverlay.Core.Models;
+using CodexProfileOverlay.Core.Services;
 using Button = System.Windows.Controls.Button;
 using ListBox = System.Windows.Controls.ListBox;
 
@@ -11,6 +12,9 @@ namespace CodexProfileOverlay;
 
 internal sealed class ProfileManagerWindow : Window
 {
+    private readonly Action<ProfileInfo> reauthorize;
+    private readonly Action<ProfileInfo> checkAccount;
+    private readonly Func<ProfileInfo, AccountAvailability> accountState;
     private readonly ListBox listBox = new();
     private readonly Localizer localizer;
     private readonly Action<ProfileInfo> renameDisplayName;
@@ -34,8 +38,14 @@ internal sealed class ProfileManagerWindow : Window
         Action<ProfileInfo> removeProfile,
         Action<IReadOnlyList<string>> reorder,
         Action<ProfileInfo> openProfileFolder,
-        Action refreshProfiles)
+        Action refreshProfiles,
+        Action<ProfileInfo> reauthorize,
+        Action<ProfileInfo> checkAccount,
+        Func<ProfileInfo, AccountAvailability> accountState)
     {
+        this.reauthorize = reauthorize;
+        this.checkAccount = checkAccount;
+        this.accountState = accountState;
         this.profiles = profiles;
         this.activeProfile = activeProfile;
         this.localizer = localizer;
@@ -61,7 +71,10 @@ internal sealed class ProfileManagerWindow : Window
 
         Content = BuildShell(addProfile);
         localizer.LanguageChanged += Rebuild;
-        Closed += (_, _) => localizer.LanguageChanged -= Rebuild;
+        var statusTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        statusTimer.Tick += (_, _) => { if (!isDraggingProfile) Rebuild(); };
+        statusTimer.Start();
+        Closed += (_, _) => { localizer.LanguageChanged -= Rebuild; statusTimer.Stop(); };
         Rebuild();
     }
 
@@ -175,7 +188,7 @@ internal sealed class ProfileManagerWindow : Window
 
         var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
         text.Children.Add(new TextBlock { Text = profile.DisplayName, FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-        text.Children.Add(new TextBlock { Text = profile.Name, FontSize = 13, Foreground = Brush("MutedTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+        text.Children.Add(new TextBlock { Text = localizer["Account" + accountState(profile)], ToolTip = localizer["AccountStatusHelp"], FontSize = 13, Foreground = Brush("MutedTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(text, 3);
         grid.Children.Add(text);
 
@@ -211,6 +224,8 @@ internal sealed class ProfileManagerWindow : Window
             BorderBrush = Brush("BorderBrush"),
             Foreground = Brush("StrongTextBrush"),
         };
+        menu.Items.Add(MenuItem(localizer["Reauthorize"], () => reauthorize(profile)));
+        menu.Items.Add(MenuItem(localizer["CheckAccount"], () => checkAccount(profile)));
         menu.Items.Add(MenuItem(localizer["Rename"], () => renameDisplayName(profile)));
         menu.Items.Add(MenuItem(localizer["OpenFolder"], () => openProfileFolder(profile)));
         var remove = MenuItem(localizer["Remove"], () => removeProfile(profile));

@@ -23,7 +23,9 @@ internal sealed class OverlayController : IDisposable
     private readonly AppPaths paths;
     private readonly OverlayVisibilityState visibilityState = new();
     private readonly CancellationTokenSource disposalTokenSource = new();
-    private readonly Dictionary<string, ProfileLoginAttempt> activeProfileLogins = new(StringComparer.OrdinalIgnoreCase);
+    private bool accountOperation;
+    private readonly Dictionary<string, DateTimeOffset> accountVerifiedAt = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, AccountAvailability> accountStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> lastUsageRefreshAttempts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ProfileStatusStore statusStore;
     private readonly ProfileStatusService statusService;
@@ -313,7 +315,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task SwitchProfileAsync(string profileName)
     {
-        if (switching || string.Equals(profileName, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
+        if (switching || accountOperation || string.Equals(profileName, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -409,138 +411,115 @@ internal sealed class OverlayController : IDisposable
 
     private async Task AddProfileAsync()
     {
+        if (switching || accountOperation) return;
         EnsureOverlay();
-        Window? dialogOwner = PromptOwner();
-        string? profileName = ShowPrompt(dialogOwner, localizer["AddProfileTitle"], localizer["ProfileDirectoryName"], primaryText: localizer["Add"]);
-        if (string.IsNullOrWhiteSpace(profileName))
+        string? name = ShowPrompt(PromptOwner(), localizer["AddProfileTitle"], localizer["ProfileDirectoryName"],
+            primaryText: localizer["BrowserLogin"]);
+        if (!string.IsNullOrWhiteSpace(name)) await LoginAccountAsync(name, false);
+    }
+
+    private async Task LoginAccountAsync(string name, bool reauthorize)
+    {
+        if (switching || accountOperation || automaticUsageRefreshRunning)
         {
+            overlayWindow?.ShowNotification(localizer["AccountBusy"]);
             return;
         }
-
-        string? validProfileName = null;
-        string? createdProfileName = null;
-        ProfileLoginAttempt? loginAttempt = null;
+        accountOperation = true;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(disposalTokenSource.Token);
+        cancellation.CancelAfter(TimeSpan.FromMinutes(10));
+        var progress = new LoginProgressWindow(localizer, cancellation);
+        CodexDesktopProcessSession? shutdown = null;
+        PreparedCodexLaunch? launch = null;
+        bool stopped = false;
+        bool added = false;
         try
         {
-            validProfileName = ProfileName.RequireValid(profileName);
-            await CancelProfileLoginAsync(validProfileName).ConfigureAwait(true);
-
-            loginAttempt = new ProfileLoginAttempt(CancellationTokenSource.CreateLinkedTokenSource(disposalTokenSource.Token));
-            activeProfileLogins[validProfileName] = loginAttempt;
-
-            string directory = profileManager.CreateProfileDirectory(validProfileName);
-            createdProfileName = validProfileName;
-            overlayWindow?.ShowNotification(localizer.Format("StartingLogin", validProfileName));
-            bool loginCreatedAuth = await processService.LoginProfileAsync(directory, loginAttempt.Cancellation.Token).ConfigureAwait(true);
-            if (!loginCreatedAuth)
+            ShowCodexOwnedWindow(progress);
+            var service = new ProfileLoginService(paths, profileManager, new OfficialProfileLoginRuntime());
+            bool success = await service.LoginAsync(name, reauthorize, token =>
+                Application.Current.Dispatcher.InvokeAsync(async () =>
+                {
+                    if (!ConfirmDialog.Show(progress, IntPtr.Zero, localizer["Reauthorize"],
+                        localizer["ReauthorizeActiveConfirm"], localizer["Reauthorize"], localizer["Cancel"])) return false;
+                    launch = await processService.PrepareLaunchAsync(token);
+                    shutdown = await processService.CloseCodexAsync(settings.GracefulCloseTimeoutSeconds,
+                        settings.ForceCloseFallback, token);
+                    CodexShutdownCoordinator.VerifyStopped(shutdown, token);
+                    stopped = true;
+                    return true;
+                }).Task.Unwrap(), cancellation.Token);
+            if (success)
             {
-                RemoveIncompleteProfile(createdProfileName);
+                added = !reauthorize;
+                accountStates[name] = AccountAvailability.Available;
+                accountVerifiedAt[name] = DateTimeOffset.UtcNow;
+                try { statusService.ClearCachedUsage(name); }
+                catch (Exception) { logger.Error("Could not clear cached usage after successful login."); }
                 RefreshProfiles();
-                overlayWindow?.ShowError(localizer["AuthNotCreated"]);
-                return;
+                overlayWindow?.ShowNotification(localizer[reauthorize ? "Reauthorized" : "ProfileAdded"]);
             }
-
-            RefreshProfiles();
-            overlayWindow?.ShowNotification(localizer["ProfileAdded"]);
-            bool switchNewProfile = ConfirmDialog.Show(
-                dialogOwner,
-                dialogOwner is null ? CurrentCodexWindowHandle() : IntPtr.Zero,
-                localizer["ConfirmSwitchTitle"],
-                localizer["SwitchNewProfile"],
-                localizer["ConfirmSwitchPrimary"],
-                localizer["Cancel"]);
-            if (switchNewProfile)
-            {
-                await SwitchProfileAsync(validProfileName).ConfigureAwait(true);
-            }
+            else overlayWindow?.ShowError(localizer["LoginFailed"]);
         }
-        catch (OperationCanceledException) when (!disposalTokenSource.IsCancellationRequested)
+        catch (LoginRuntimeUnavailableException)
         {
-            RemoveIncompleteProfile(createdProfileName);
-            RefreshProfiles();
+            System.Windows.MessageBox.Show(progress, localizer["LoginRuntimeMissing"], localizer["BrowserLogin"],
+                MessageBoxButton.OK, MessageBoxImage.Information);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException) { }
+        catch (Exception)
         {
-            RemoveIncompleteProfile(createdProfileName);
-            RefreshProfiles();
-            logger.Error("Add profile failed.", exception);
-            overlayWindow?.ShowError(localizer["CouldNotAddProfile"]);
+            // Never include runtime output or credential parser errors in logs.
+            logger.Error("Account login failed.");
+            overlayWindow?.ShowError(localizer["LoginFailed"]);
         }
         finally
         {
-            if (validProfileName is not null && loginAttempt is not null)
+            progress.Close();
+            if (stopped && launch is not null && !disposalTokenSource.IsCancellationRequested)
             {
-                if (activeProfileLogins.TryGetValue(validProfileName, out ProfileLoginAttempt? activeAttempt) && ReferenceEquals(activeAttempt, loginAttempt))
-                {
-                    activeProfileLogins.Remove(validProfileName);
-                }
-
-                loginAttempt.Complete();
-                loginAttempt.Dispose();
+                try { await LaunchCodexAndWaitAsync(disposalTokenSource.Token, throwOnFailure: true, launch); }
+                catch (Exception) { overlayWindow?.ShowError(localizer["LoginRelaunchFailed"]); }
             }
+            shutdown?.Dispose();
+            accountOperation = false;
+            RefreshProfiles();
+        }
+        if (added && !disposalTokenSource.IsCancellationRequested && ConfirmDialog.Show(
+            PromptOwner(), CurrentCodexWindowHandle(), localizer["ConfirmSwitchTitle"], localizer["SwitchNewProfile"],
+            localizer["ConfirmSwitchPrimary"], localizer["Cancel"]))
+        {
+            await SwitchProfileAsync(name);
         }
     }
 
-    private void RemoveIncompleteProfile(string? profileName)
+    private AccountAvailability GetAccountState(ProfileInfo profile)
     {
-        if (string.IsNullOrWhiteSpace(profileName))
+        AccountAvailability state = accountStates.GetValueOrDefault(profile.Name, AccountAvailability.Unknown);
+        if (state == AccountAvailability.Available
+            && (!accountVerifiedAt.TryGetValue(profile.Name, out var verified)
+                || DateTimeOffset.UtcNow - verified > TimeSpan.FromMinutes(15))) return AccountAvailability.Unknown;
+        return state;
+    }
+
+    private async Task CheckAccountAsync(ProfileInfo profile)
+    {
+        if (switching || accountOperation || automaticUsageRefreshRunning)
         {
+            overlayWindow?.ShowNotification(localizer["AccountBusy"]);
             return;
         }
-
+        accountOperation = true;
         try
         {
-            _ = profileManager.RemoveIncompleteProfileDirectory(profileName);
+            accountStates[profile.Name] = await new AccountStatusChecker(paths).CheckAsync(profile.DirectoryPath, disposalTokenSource.Token);
+            profileManagerWindow?.UpdateProfiles(profiles, activeProfileStore.Read());
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception) { accountStates[profile.Name] = AccountAvailability.Unknown; }
+        finally
         {
-            logger.Error("Could not remove incomplete profile directory.", exception);
-        }
-    }
-
-    private async Task CancelProfileLoginAsync(string profileName)
-    {
-        if (!activeProfileLogins.TryGetValue(profileName, out ProfileLoginAttempt? loginAttempt))
-        {
-            return;
-        }
-
-        loginAttempt.Cancel();
-        Task completed = await Task.WhenAny(
-            loginAttempt.Completion,
-            Task.Delay(TimeSpan.FromSeconds(5), disposalTokenSource.Token)).ConfigureAwait(true);
-        if (completed != loginAttempt.Completion)
-        {
-            logger.Info($"Timed out waiting for previous login attempt for '{profileName}' to stop.");
-        }
-    }
-
-    private sealed class ProfileLoginAttempt : IDisposable
-    {
-        private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public ProfileLoginAttempt(CancellationTokenSource cancellation)
-        {
-            Cancellation = cancellation;
-        }
-
-        public CancellationTokenSource Cancellation { get; }
-
-        public Task Completion => completion.Task;
-
-        public void Cancel()
-        {
-            Cancellation.Cancel();
-        }
-
-        public void Complete()
-        {
-            completion.TrySetResult();
-        }
-
-        public void Dispose()
-        {
-            Cancellation.Dispose();
+            accountOperation = false;
+            profileManagerWindow?.UpdateProfiles(profiles, activeProfileStore.Read());
         }
     }
 
@@ -572,7 +551,7 @@ internal sealed class OverlayController : IDisposable
             ResetPosition,
             ResetSettings,
             () => Application.Current.Shutdown(),
-            () => !switching);
+            () => !switching && !accountOperation);
         settingsWindow.Closed += (_, _) => settingsWindow = null;
         ShowCodexOwnedWindow(settingsWindow);
         settingsWindow.SetConflicts(RegisterHotkeys());
@@ -595,7 +574,10 @@ internal sealed class OverlayController : IDisposable
             RemoveProfile,
             ReorderProfiles,
             profile => OpenFolder(profile.DirectoryPath),
-            RefreshProfiles);
+            RefreshProfiles,
+            profile => _ = LoginAccountAsync(profile.Name, true),
+            profile => _ = CheckAccountAsync(profile),
+            GetAccountState);
         profileManagerWindow.Closed += (_, _) => profileManagerWindow = null;
         ShowCodexOwnedWindow(profileManagerWindow);
     }
@@ -615,6 +597,7 @@ internal sealed class OverlayController : IDisposable
 
     private void RenameDirectory(ProfileInfo profile)
     {
+        if (accountOperation) return;
         if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
         {
             overlayWindow?.ShowError(localizer["ActiveProfileCannotRemove"]);
@@ -634,6 +617,7 @@ internal sealed class OverlayController : IDisposable
 
     private void RemoveProfile(ProfileInfo profile)
     {
+        if (accountOperation) return;
         if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
         {
             overlayWindow?.ShowError(localizer["ActiveProfileCannotRename"]);
@@ -798,7 +782,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task RefreshUsageForProfileAsync(string profileName)
     {
-        if (switching || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
+        if (switching || accountOperation || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
         {
             return;
         }
@@ -818,7 +802,7 @@ internal sealed class OverlayController : IDisposable
     private void BeginAutomaticUsageRefreshIfDue()
     {
         if (automaticUsageRefreshRunning
-            || switching
+            || switching || accountOperation
             || profiles.Count == 0
             || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
         {
@@ -868,7 +852,7 @@ internal sealed class OverlayController : IDisposable
             foreach (ProfileInfo profile in dueProfiles)
             {
                 if (disposalTokenSource.IsCancellationRequested
-                    || switching
+                    || switching || accountOperation
                     || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
                 {
                     return;

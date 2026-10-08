@@ -68,10 +68,18 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
         return null;
     }
 
+    public static async Task<string?> ReadAccountAsync(string directory, CancellationToken cancellationToken)
+    {
+        string? executable = CodexCliLocator.FindExecutable();
+        if (executable is null) return null;
+        var capture = await CaptureOnceAsync(executable, directory, cancellationToken, accountRead: true).ConfigureAwait(false);
+        return capture?.StatusOutput;
+    }
+
     private static async Task<CodexRateLimitsCapture?> CaptureOnceAsync(
         string executable,
         string fullProfileDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool accountRead = false)
     {
         using var process = new Process
         {
@@ -79,7 +87,7 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
         };
 
         process.Start();
-        Task<string> stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        Task stderrTask = OfficialProfileLoginRuntime.DrainAsync(process.StandardError);
         try
         {
             await WriteMessageAsync(
@@ -92,7 +100,9 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
             }
 
             await WriteMessageAsync(process.StandardInput, "{\"method\":\"initialized\"}", cancellationToken).ConfigureAwait(false);
-            await WriteMessageAsync(process.StandardInput, "{\"id\":2,\"method\":\"account/rateLimits/read\"}", cancellationToken).ConfigureAwait(false);
+            await WriteMessageAsync(process.StandardInput, accountRead
+                ? "{\"id\":2,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}"
+                : "{\"id\":2,\"method\":\"account/rateLimits/read\"}", cancellationToken).ConfigureAwait(false);
             string? response = await ReadResponseAsync(process.StandardOutput, 2, cancellationToken).ConfigureAwait(false);
             return response is null
                 ? null
@@ -113,7 +123,7 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
             }
 
             await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            _ = await stderrTask.ConfigureAwait(false);
+            await stderrTask.ConfigureAwait(false);
         }
     }
 
@@ -129,7 +139,9 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
             CreateNoWindow = true,
         };
         startInfo.ArgumentList.Add("app-server");
-        startInfo.ArgumentList.Add("--stdio");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("cli_auth_credentials_store=\"file\"");
+        foreach (string key in new[] { "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN" }) startInfo.Environment.Remove(key);
         startInfo.Environment["CODEX_HOME"] = profileDirectory;
         return startInfo;
     }

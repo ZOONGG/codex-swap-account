@@ -7,6 +7,21 @@ public static class LocalizationCatalog
 {
     private static readonly IReadOnlyDictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+
+        ["BrowserLogin"] = "Sign in through browser",
+        ["AccountBusy"] = "Wait for the current account operation or usage check to finish, then retry.",
+        ["AccountStatusHelp"] = "Available means sign-in succeeded within 15 minutes. Stored credentials alone cannot prove validity. Status checks do not force token refresh.",
+        ["Reauthorize"] = "Reauthorize",
+        ["Reauthorized"] = "Account authorization updated",
+        ["CheckAccount"] = "Check account status",
+        ["AccountAvailable"] = "Available",
+        ["AccountSignInRequired"] = "Sign-in required",
+        ["AccountUnknown"] = "Unknown",
+        ["LoginWaiting"] = "Complete sign-in in your browser, then return here. You can cancel at any time. Login times out after 10 minutes.",
+        ["LoginRuntimeMissing"] = "The official Codex sign-in runtime was not found or could not start. Install or update the official Codex Desktop app for Windows, open it once, then retry here. No terminal or manual auth.json editing is needed.",
+        ["LoginFailed"] = "Sign-in did not complete. Existing accounts are unchanged. Retry browser sign-in.",
+        ["ReauthorizeActiveConfirm"] = "Sign-in succeeded. Save your work in Codex. Close Codex safely and apply the new authorization? Cancelling keeps the previous authorization.",
+        ["LoginRelaunchFailed"] = "Authorization was saved, but Codex could not reopen. Open Codex Desktop manually.",
         ["Updates"] = "Application updates",
         ["UpdateRestart"] = "Update and restart",
         ["UpdateGetInstaller"] = "Install Codex Swap Account",
@@ -234,6 +249,21 @@ public static class LocalizationCatalog
 
     private static readonly IReadOnlyDictionary<string, string> Russian = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+
+        ["BrowserLogin"] = "Войти через браузер",
+        ["AccountBusy"] = "Дождитесь завершения текущей операции с аккаунтом или проверки лимитов и повторите попытку.",
+        ["AccountStatusHelp"] = "Доступен: вход выполнен за последние 15 минут. Сохранённые данные сами по себе не подтверждают авторизацию. Проверка не обновляет токены принудительно.",
+        ["Reauthorize"] = "Войти заново",
+        ["Reauthorized"] = "Авторизация аккаунта обновлена",
+        ["CheckAccount"] = "Проверить статус аккаунта",
+        ["AccountAvailable"] = "Доступен",
+        ["AccountSignInRequired"] = "Требуется вход",
+        ["AccountUnknown"] = "Не удалось проверить",
+        ["LoginWaiting"] = "Завершите вход в браузере и вернитесь сюда. Вход можно отменить в любой момент. Время ожидания — 10 минут.",
+        ["LoginRuntimeMissing"] = "Официальный компонент входа Codex не найден или не запускается. Установите или обновите официальный Codex Desktop для Windows, откройте его один раз и повторите вход здесь. Терминал и ручное редактирование auth.json не нужны.",
+        ["LoginFailed"] = "Вход не завершён. Существующие аккаунты не изменены. Повторите вход через браузер.",
+        ["ReauthorizeActiveConfirm"] = "Вход выполнен. Сохраните работу в Codex. Безопасно закрыть Codex и применить новую авторизацию? При отмене сохранится прежняя авторизация.",
+        ["LoginRelaunchFailed"] = "Авторизация сохранена, но Codex не удалось открыть. Запустите Codex Desktop вручную.",
         ["Updates"] = "Обновления приложения",
         ["UpdateRestart"] = "Обновить и перезапустить",
         ["UpdateGetInstaller"] = "Установить Codex Swap Account",
