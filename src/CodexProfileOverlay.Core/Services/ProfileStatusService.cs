@@ -10,6 +10,7 @@ public sealed class ProfileStatusService : IDisposable
     private readonly ProfileStatusStore store;
     private readonly IUsageProvider usageProvider;
     private readonly SafeLogger logger;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> refreshing = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private TimeSpan staleThreshold = TimeSpan.FromMinutes(90);
     private bool disposed;
@@ -104,7 +105,17 @@ public sealed class ProfileStatusService : IDisposable
         TimeSpan? timeout = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        await refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!refreshing.TryAdd(profileId, 0)) return;
+        try
+        {
+            await refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            refreshing.TryRemove(profileId, out _);
+            throw;
+        }
         try
         {
             ProfileStatusMetadata status = GetOrCreateStatus(document, profileId);
@@ -155,6 +166,7 @@ public sealed class ProfileStatusService : IDisposable
         finally
         {
             refreshGate.Release();
+            refreshing.TryRemove(profileId, out _);
         }
     }
 

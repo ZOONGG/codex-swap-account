@@ -18,6 +18,11 @@ internal sealed class TrayIconService : IDisposable
     private bool overlayVisible;
     private bool startWithWindows;
     private bool disposed;
+    private Icon? usageIcon;
+    private int? displayedPercent;
+    private UsageSnapshot? latestSnapshot;
+    private OverlaySettings? latestSettings;
+    private readonly System.Windows.Forms.Timer usageTimer = new() { Interval = 30000 };
 
     public TrayIconService(Localizer localizer)
     {
@@ -39,6 +44,8 @@ internal sealed class TrayIconService : IDisposable
                 ToggleOverlayRequested?.Invoke();
             }
         };
+        usageTimer.Tick += (_, _) => { if (latestSettings is not null) UpdateUsage(latestSnapshot, latestSettings); };
+        usageTimer.Start();
         localizer.LanguageChanged += RebuildMenu;
         RebuildMenu();
     }
@@ -89,6 +96,35 @@ internal sealed class TrayIconService : IDisposable
         RebuildMenu();
     }
 
+    public void UpdateUsage(UsageSnapshot? snapshot, OverlaySettings settings)
+    {
+        latestSnapshot = snapshot;
+        latestSettings = settings;
+        int? percent = UsageDisplayFormatter.TrayPercent(snapshot, settings.TrayUsageMode, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(settings.StaleDataThresholdMinutes));
+        if (percent == displayedPercent) return;
+        displayedPercent = percent;
+        Icon? previous = usageIcon;
+        usageIcon = null;
+        if (percent is { } value)
+        {
+            using var bitmap = new Bitmap(32, 32);
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.Clear(Color.FromArgb(28, 32, 39));
+            using var font = new Font("Segoe UI", value == 100 ? 12 : 15, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            graphics.DrawString(value.ToString(), font, Brushes.White, new RectangleF(0, 0, 32, 32), format);
+            IntPtr handle = bitmap.GetHicon();
+            try { using var borrowed = Icon.FromHandle(handle); usageIcon = (Icon)borrowed.Clone(); }
+            finally { DestroyIcon(handle); }
+        }
+        notifyIcon.Icon = usageIcon ?? icon;
+        notifyIcon.Text = percent is null ? "Codex Profile Overlay" : $"{percent}% {localizer["UsageRemaining"]}";
+        previous?.Dispose();
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr handle);
+
     public void ShowBalloon(string title, string message)
     {
         notifyIcon.BalloonTipTitle = title;
@@ -107,8 +143,10 @@ internal sealed class TrayIconService : IDisposable
         localizer.LanguageChanged -= RebuildMenu;
         singleClickTimer.Stop();
         singleClickTimer.Dispose();
+        usageTimer.Dispose();
         notifyIcon.Visible = false;
         notifyIcon.Dispose();
+        usageIcon?.Dispose();
         icon.Dispose();
         menu.Dispose();
     }

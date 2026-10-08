@@ -118,6 +118,28 @@ public sealed class ProfileStatusServiceTests
     }
 
     [Fact]
+    public async Task Refresh_DeduplicatesOverlappingRequestsForSameProfile()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        using TestService fixture = new(new DelegateProvider(async (_, token) => {
+            Interlocked.Increment(ref calls);
+            entered.SetResult();
+            await release.Task.WaitAsync(token);
+            return Snapshot(("5h", 72, null));
+        }));
+        var document = new ProfileStatusDocument();
+        Task first = fixture.Service.RefreshUsageAsync("work", @"C:\fake-profile", document, CancellationToken.None);
+        await entered.Task;
+        await fixture.Service.RefreshUsageAsync("WORK", @"C:\fake-profile", document, CancellationToken.None);
+        release.SetResult();
+        await first;
+        Assert.Equal(1, calls);
+        Assert.Equal(72, UsageIntelligence.EffectiveRemainingPercent(document.Snapshots["work"]));
+    }
+
+    [Fact]
     public async Task FailedRefresh_PreservesPreviousSnapshotAndMarksItStale()
     {
         using TestService fixture = new(new DelegateProvider((_, _) => throw new InvalidOperationException("fake failure")));

@@ -139,6 +139,7 @@ internal sealed class OverlayController : IDisposable
 
         overlayWindow = new OverlayWindow(settings, logger)
         {
+            OnRefreshUsage = RefreshUsageForProfileAsync,
             OnSwitchProfile = profile => _ = SwitchProfileAsync(profile),
             OnRefreshProfiles = RefreshProfiles,
             OnOpenProfilesFolder = () => OpenFolder(paths.ProfilesDirectory),
@@ -778,11 +779,12 @@ internal sealed class OverlayController : IDisposable
             ? statusService.FindRecommendedProfile(profiles.Select(profile => profile.Name).ToArray(), statusDocument)
             : null;
         overlayWindow?.SetStatusDocument(statusDocument, recommendedProfile);
+        trayIcon?.UpdateUsage(statusDocument.Snapshots.GetValueOrDefault(activeProfileStore.Read() ?? string.Empty), settings);
     }
 
     private async Task RefreshUsageForProfileAsync(string profileName)
     {
-        if (switching || accountOperation || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
+        if (switching || accountOperation || statusService.ProviderCapability != UsageProviderCapability.Supported)
         {
             return;
         }

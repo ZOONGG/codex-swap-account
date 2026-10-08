@@ -7,6 +7,16 @@ public static class LocalizationCatalog
 {
     private static readonly IReadOnlyDictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        ["FiveHourLimit"] = "5-hour limit",
+        ["WeeklyLimit"] = "Weekly limit",
+        ["UsageDetails"] = "Account limits",
+        ["UsageRemaining"] = "remaining",
+        ["UsageLoading"] = "Refreshing…",
+        ["TrayUsage"] = "Tray usage",
+        ["TrayUsageHelp"] = "Active account remaining capacity; stale values are hidden.",
+        ["DefaultIcon"] = "Application icon",
+        ["FiveHourRemaining"] = "5-hour remaining",
+        ["WeeklyRemaining"] = "Weekly remaining",
 
         ["BrowserLogin"] = "Sign in through browser",
         ["AccountBusy"] = "Wait for the current account operation or usage check to finish, then retry.",
@@ -249,6 +259,16 @@ public static class LocalizationCatalog
 
     private static readonly IReadOnlyDictionary<string, string> Russian = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        ["FiveHourLimit"] = "Лимит за 5 часов",
+        ["WeeklyLimit"] = "Недельный лимит",
+        ["UsageDetails"] = "Лимиты аккаунта",
+        ["UsageRemaining"] = "осталось",
+        ["UsageLoading"] = "Обновление…",
+        ["TrayUsage"] = "Лимиты в трее",
+        ["TrayUsageHelp"] = "Лимит активного аккаунта; устаревшие данные скрыты.",
+        ["DefaultIcon"] = "Значок приложения",
+        ["FiveHourRemaining"] = "Остаток за 5 часов",
+        ["WeeklyRemaining"] = "Остаток за неделю",
 
         ["BrowserLogin"] = "Войти через браузер",
         ["AccountBusy"] = "Дождитесь завершения текущей операции с аккаунтом или проверки лимитов и повторите попытку.",

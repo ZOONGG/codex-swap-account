@@ -568,6 +568,7 @@ internal sealed class SettingsWindow : Window
                 settings.ShowAutomaticLimitIndicators && providerSupported,
                 value => settings.ShowAutomaticLimitIndicators = value,
                 providerSupported),
+            EnumCombo(localizer["TrayUsage"], localizer["TrayUsageHelp"], settings.TrayUsageMode, value => settings.TrayUsageMode = value),
             SettingCheck(localizer["ShowIndicatorsInOverlay"], localizer["ShowIndicatorsInOverlayHelp"], settings.ShowIndicatorsInOverlay, value => settings.ShowIndicatorsInOverlay = value),
             SettingCheck(localizer["ShowManualEmoji"], localizer["ShowManualEmojiHelp"], settings.ShowManualProfileEmojiInOverlay, value => settings.ShowManualProfileEmojiInOverlay = value),
             NumberInput(localizer["GreenThreshold"], localizer["GreenThresholdHelp"], settings.GreenThresholdPercent, value => settings.GreenThresholdPercent = (int)value, 1, 26, 100),
@@ -581,6 +582,16 @@ internal sealed class SettingsWindow : Window
 
         stack.Children.Add(Card(rows.ToArray()));
         stack.Children.Add(BuildManualStatusEditor(providerSupported));
+        var usageDocument = statusService.Load();
+        var recommended = statusService.FindRecommendedProfile(profiles.Select(p => p.Name).ToArray(), usageDocument);
+        foreach (var profile in profiles)
+        {
+            stack.Children.Add(Card(UsageDetailsView.Build(profile.DisplayName,
+                usageDocument.Snapshots.GetValueOrDefault(profile.Name),
+                usageDocument.Profiles.FirstOrDefault(p => p.ProfileId == profile.Name)?.LastRefreshError,
+                settings.ShowAutomaticLimitIndicators && recommended == profile.Name, settings, localizer,
+                async () => { await refreshUsage(profile.Name); Rebuild(); })));
+        }
 
         var legend = new StackPanel();
         legend.Children.Add(new TextBlock
@@ -767,21 +778,6 @@ internal sealed class SettingsWindow : Window
             }
         };
         actions.Children.Add(testProvider);
-        var refresh = new Button { Content = localizer["RefreshNow"], IsEnabled = providerSupported && settings.ShowAutomaticLimitIndicators, Margin = new Thickness(0, 0, 8, 0) };
-        refresh.Click += async (_, _) =>
-        {
-            refresh.IsEnabled = false;
-            try
-            {
-                await refreshUsage(selected.Name);
-                Rebuild();
-            }
-            finally
-            {
-                refresh.IsEnabled = providerSupported && settings.ShowAutomaticLimitIndicators;
-            }
-        };
-        actions.Children.Add(refresh);
         var clearManual = new Button { Content = localizer["ClearManualStatus"], Margin = new Thickness(0, 0, 8, 0) };
         clearManual.Click += (_, _) => { statusService.ClearManualStatus(selected.Name); statusChanged(); Rebuild(); };
         actions.Children.Add(clearManual);
@@ -790,13 +786,6 @@ internal sealed class SettingsWindow : Window
         actions.Children.Add(clearCached);
         panel.Children.Add(actions);
 
-        panel.Children.Add(new TextBlock
-        {
-            Text = BuildUsageDetails(selected.Name, document, providerSupported),
-            Foreground = Brush("MutedTextBrush"),
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 16, 0, 0),
-        });
         return Card(panel);
     }
 
@@ -1592,6 +1581,7 @@ internal sealed class SettingsWindow : Window
             OverlayDisplayMode.Auto => localizer["Auto"],
             OverlayDisplayMode.Compact => localizer["Compact"],
             OverlayDisplayMode.Expanded => localizer["Expanded"],
+            TrayUsageMode mode => localizer[mode.ToString()],
             _ => value.ToString(),
         };
     }

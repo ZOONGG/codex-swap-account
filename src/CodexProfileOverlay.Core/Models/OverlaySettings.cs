@@ -42,6 +42,8 @@ public sealed class OverlaySettings
 
     public double SettingsWindowHeight { get; set; } = 720;
 
+    public TrayUsageMode TrayUsageMode { get; set; } = TrayUsageMode.DefaultIcon;
+
     public bool ShowAutomaticLimitIndicators { get; set; } = false;
 
     public int GreenThresholdPercent { get; set; } = 60;

@@ -25,6 +25,9 @@ internal sealed class OverlayWindow : Window
     private readonly OverlayLayoutService layoutService = new();
     private readonly Border shell = new();
     private readonly Popup compactPopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom };
+    private readonly Popup usagePopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.None };
+    private string? usageProfile;
+    public Func<string, Task>? OnRefreshUsage { get; set; }
     private readonly List<Button> profileButtons = [];
     private HwndSource? hwndSource;
     private IReadOnlyList<ProfileInfo> profiles = [];
@@ -61,6 +64,14 @@ internal sealed class OverlayWindow : Window
         SnapsToDevicePixels = true;
         ApplyScale();
 
+        usagePopup.Closed += (_, _) => { indicatorSignature = BuildIndicatorSignature(); RebuildContent(); };
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape) return;
+            usagePopup.IsOpen = false;
+            compactPopup.IsOpen = false;
+            e.Handled = true;
+        };
         Content = shell;
         RebuildContent();
         MouseLeftButtonDown += OnMouseLeftButtonDown;
@@ -72,6 +83,7 @@ internal sealed class OverlayWindow : Window
             if (!IsVisible)
             {
                 compactPopup.IsOpen = false;
+                usagePopup.IsOpen = false;
             }
         };
     }
@@ -111,12 +123,17 @@ internal sealed class OverlayWindow : Window
         ApplyToolWindowStyle(helper.Handle);
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int key);
+
     public void UpdatePlacement(IntPtr codexHwnd)
     {
+        if (usagePopup.IsOpen && (GetAsyncKeyState(0x1B) & 0x8000) != 0) usagePopup.IsOpen = false;
         if (!NativeMethods.IsWindowVisible(codexHwnd) || NativeMethods.IsIconic(codexHwnd))
         {
             Hide();
             compactPopup.IsOpen = false;
+            usagePopup.IsOpen = false;
             return;
         }
 
@@ -124,6 +141,7 @@ internal sealed class OverlayWindow : Window
         {
             Hide();
             compactPopup.IsOpen = false;
+            usagePopup.IsOpen = false;
             return;
         }
 
@@ -142,6 +160,7 @@ internal sealed class OverlayWindow : Window
         bool geometryChanged = placementDirty || !NearlyEqual(clientBounds, lastClientBounds);
         if (geometryChanged)
         {
+            usagePopup.IsOpen = false;
             UpdateLayout();
         }
 
@@ -217,8 +236,9 @@ internal sealed class OverlayWindow : Window
     {
         statusDocument = document;
         recommendedProfile = recommendedProfileId;
+        if (usagePopup.IsOpen && usageProfile is not null) usagePopup.Child = BuildUsagePanel(usageProfile);
         string newSignature = BuildIndicatorSignature();
-        if (!string.Equals(indicatorSignature, newSignature, StringComparison.Ordinal))
+        if (!usagePopup.IsOpen && !string.Equals(indicatorSignature, newSignature, StringComparison.Ordinal))
         {
             indicatorSignature = newSignature;
             RebuildContent();
@@ -229,6 +249,7 @@ internal sealed class OverlayWindow : Window
     {
         isSwitching = switching;
         compactPopup.IsOpen = false;
+        usagePopup.IsOpen = false;
         foreach (Button button in profileButtons)
         {
             button.IsEnabled = !switching;
@@ -351,7 +372,7 @@ internal sealed class OverlayWindow : Window
         foreach (ProfileInfo profile in profiles)
         {
             Button button = CreateProfileButton(profile, string.Equals(profile.Name, activeProfile, StringComparison.OrdinalIgnoreCase));
-            panel.Children.Add(button);
+            panel.Children.Add(ProfileWithDetails(profile, button));
             profileButtons.Add(button);
         }
 
@@ -399,9 +420,10 @@ internal sealed class OverlayWindow : Window
             item.Click += (_, _) =>
             {
                 compactPopup.IsOpen = false;
+                usagePopup.IsOpen = false;
                 OnSwitchProfile?.Invoke(name);
             };
-            panel.Children.Add(item);
+            panel.Children.Add(ProfileWithDetails(profile, item));
         }
 
         panel.Children.Add(new Separator { Margin = new Thickness(2, 5, 2, 5) });
@@ -411,6 +433,46 @@ internal sealed class OverlayWindow : Window
         panel.Children.Add(CreatePopupCommand(Localizer?["Settings"] ?? "Settings", OnOpenSettings));
         panel.Children.Add(CreatePopupCommand(Localizer?["HideSwitcher"] ?? "Hide switcher", OnHideOverlay));
         border.Child = panel;
+        return border;
+    }
+
+    private UIElement ProfileWithDetails(ProfileInfo profile, Button account)
+    {
+        var row = new DockPanel();
+        var info = new Button { Content = "ⓘ", ToolTip = Localizer?["UsageDetails"], Padding = new Thickness(4, 0, 4, 0), MinWidth = 24, MinHeight = 24, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
+        System.Windows.Automation.AutomationProperties.SetName(info, (Localizer?["UsageDetails"] ?? "Account limits") + " " + profile.DisplayName);
+        DockPanel.SetDock(info, Dock.Right);
+        info.Click += (_, e) => {
+            e.Handled = true;
+            usageProfile = profile.Name;
+            if (compactPopup.IsOpen)
+            {
+                compactPopup.IsOpen = false;
+                usagePopup.PlacementTarget = shell;
+            }
+            else usagePopup.PlacementTarget = info;
+            usagePopup.Child = BuildUsagePanel(profile.Name);
+            usagePopup.IsOpen = true;
+        };
+        row.Children.Add(info);
+        row.Children.Add(account);
+        return row;
+    }
+
+    private UIElement BuildUsagePanel(string profileId)
+    {
+        var profile = profiles.FirstOrDefault(p => p.Name == profileId);
+        var snapshot = statusDocument?.Snapshots.GetValueOrDefault(profileId);
+        var error = statusDocument?.Profiles.FirstOrDefault(p => p.ProfileId == profileId)?.LastRefreshError;
+        var border = new Border { Width = 312, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
+            UseLayoutRounding = true, Background = FindBrush("OverlayBackgroundBrush"), BorderBrush = FindBrush("OverlayBorderBrush") };
+        border.Child = new ScrollViewer { MaxHeight = 480, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = UsageDetailsView.Build(profile?.DisplayName ?? profileId, snapshot, error,
+                string.Equals(profileId, recommendedProfile, StringComparison.OrdinalIgnoreCase), settings, Localizer!, async () => {
+                    if (OnRefreshUsage is not null) await OnRefreshUsage(profileId);
+                    if (usagePopup.IsOpen) usagePopup.Child = BuildUsagePanel(profileId);
+                }) };
+        border.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { usagePopup.IsOpen = false; e.Handled = true; } };
         return border;
     }
 
@@ -763,6 +825,7 @@ internal sealed class OverlayWindow : Window
         button.Click += (_, _) =>
         {
             compactPopup.IsOpen = false;
+            usagePopup.IsOpen = false;
             action?.Invoke();
         };
         return button;
