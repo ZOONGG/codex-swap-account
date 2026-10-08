@@ -8,6 +8,17 @@ public static class LocalizationCatalog
     private static readonly IReadOnlyDictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["Updates"] = "Application updates",
+        ["UpdateRestart"] = "Update and restart",
+        ["UpdateGetInstaller"] = "Install Codex Swap Account",
+        ["UpdateLater"] = "Later",
+        ["UpdatePortable"] = "Portable mode. Save and run the installer to enable in-app installation. This copy will not be changed.",
+        ["UpdateConfirm"] = "Download the verified update, close Codex Swap Account and install it with visible progress? The switcher will restart. Your accounts and settings will be preserved.",
+        ["UpdateSwitchBusy"] = "An account switch is in progress. Wait for it to finish and retry.",
+        ["UpdateReady"] = "Verified. Starting installer…",
+        ["UpdateInstallerSaved"] = "Verified installer saved. Run it to install Codex Swap Account.",
+        ["UpdateInstallFailed"] = "Update failed. The switcher remains available. Retry or download the official installer from GitHub. If installation fails after closing, reopen the existing app or rerun the installer.",
+        ["UpdateInstalledVersion"] = "Installed version: {0}",
+
         ["UpdateCheck"] = "Check for updates",
         ["UpdateDownload"] = "Download update",
         ["UpdateGitHub"] = "View on GitHub",
@@ -224,6 +235,17 @@ public static class LocalizationCatalog
     private static readonly IReadOnlyDictionary<string, string> Russian = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["Updates"] = "Обновления приложения",
+        ["UpdateRestart"] = "Обновить и перезапустить",
+        ["UpdateGetInstaller"] = "Установить Codex Swap Account",
+        ["UpdateLater"] = "Позже",
+        ["UpdatePortable"] = "Portable-режим. Сохраните и запустите установщик для обновлений внутри приложения. Текущая копия останется без изменений.",
+        ["UpdateConfirm"] = "Скачать проверенное обновление, закрыть Codex Swap Account и установить его с отображением прогресса? Переключатель перезапустится. Аккаунты и настройки сохранятся.",
+        ["UpdateSwitchBusy"] = "Выполняется переключение аккаунта. Дождитесь завершения и повторите попытку.",
+        ["UpdateReady"] = "Файл проверен. Запуск установщика…",
+        ["UpdateInstallerSaved"] = "Проверенный установщик сохранён. Запустите его для установки Codex Swap Account.",
+        ["UpdateInstallFailed"] = "Обновление не удалось. Переключатель доступен. Повторите попытку или скачайте официальный установщик с GitHub. При ошибке после закрытия откройте прежнее приложение или снова запустите установщик.",
+        ["UpdateInstalledVersion"] = "Установленная версия: {0}",
+
         ["UpdateCheck"] = "Проверить обновления",
         ["UpdateDownload"] = "Скачать обновление",
         ["UpdateGitHub"] = "Открыть на GitHub",

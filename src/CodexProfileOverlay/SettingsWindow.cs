@@ -24,6 +24,8 @@ internal sealed class SettingsWindow : Window
     private bool checkingUpdate, downloadingUpdate;
     private string? updateMessage;
     private double updateProgress;
+    private readonly Func<bool> canInstallUpdate;
+    private readonly bool installed;
     private readonly Action<OverlaySettings> save;
     private readonly Action statusChanged;
     private readonly Func<string, Task> refreshUsage;
@@ -74,10 +76,14 @@ internal sealed class SettingsWindow : Window
         Action openLogsFolder,
         Action resetPosition,
         Action resetSettings,
-        Action exitApplication)
+        Action exitApplication,
+        Func<bool> canInstallUpdate)
     {
         this.settings = settings;
         this.updates = updates;
+        this.canInstallUpdate = canInstallUpdate;
+        using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(InstallationMode.UninstallKey))
+            installed = InstallationMode.IsInstalled(Environment.ProcessPath!, key?.GetValue("InstallLocation") as string);
         updates.Changed += UpdateChanged;
         this.profiles = profiles;
         this.localizer = localizer;
@@ -974,6 +980,7 @@ internal sealed class SettingsWindow : Window
         heading.Children.Add(new TextBlock { Text = localizer[state], TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(heading);
         panel.Children.Add(new TextBlock { Text = "v" + updates.CurrentVersion + (updates.HasUpdate ? " → " + updates.Cache.Release!.Tag : ""), Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 6, 0, 8) });
+        if (!installed) panel.Children.Add(new TextBlock { Text = localizer["UpdatePortable"], TextWrapping = TextWrapping.Wrap, Foreground = Brush("MutedTextBrush") });
         if (updates.HasUpdate && updates.Cache.Release is { } release)
         {
             panel.Children.Add(new TextBlock { Text = release.Published.ToLocalTime().ToString("d", CultureInfo.CurrentCulture), Foreground = Brush("MutedTextBrush") });
@@ -997,8 +1004,11 @@ internal sealed class SettingsWindow : Window
         if (updates.HasUpdate)
         {
             ActionButton("UpdateDownload", async (_, _) => await DownloadUpdateAsync()).IsEnabled = !downloadingUpdate && !checkingUpdate;
+            ActionButton(installed ? "UpdateRestart" : "UpdateGetInstaller", async (_, _) => await DownloadUpdateAsync(true)).IsEnabled = !downloadingUpdate && !checkingUpdate;
+            ActionButton("UpdateLater", (_, _) => { page = SettingsPage.General; Rebuild(); });
             ActionButton("UpdateGitHub", (_, _) => OpenExternalUrl(updates.Cache.Release!.Url));
         }
+        else if (!installed) ActionButton("UpdateGetInstaller", (_, _) => OpenExternalUrl(UpdateService.RepositoryUrl + "/releases/latest"));
         if (downloadingUpdate) ActionButton("UpdateCancel", (_, _) => downloadCancellation?.Cancel());
         panel.Children.Add(actions);
         if (downloadingUpdate) panel.Children.Add(new ProgressBar { Minimum = 0, Maximum = 100, Value = updateProgress, Height = 6, Margin = new Thickness(0, 8, 0, 8) });
@@ -1006,8 +1016,14 @@ internal sealed class SettingsWindow : Window
         return Card(panel);
     }
 
-    private async Task DownloadUpdateAsync()
+    private async Task DownloadUpdateAsync(bool installer = false)
     {
+        if (downloadingUpdate) return;
+        if (installer && installed)
+        {
+            if (!canInstallUpdate()) { updateMessage = "UpdateSwitchBusy"; Rebuild(); return; }
+            if (!ConfirmDialog.Show(this, IntPtr.Zero, localizer["Updates"], localizer["UpdateConfirm"], localizer["UpdateRestart"], localizer["UpdateLater"])) return;
+        }
         downloadingUpdate = true; updateProgress = 0; updateMessage = null;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(updateLifetime.Token);
         downloadCancellation = cancellation;
@@ -1022,21 +1038,29 @@ internal sealed class SettingsWindow : Window
                 // Update the existing bar without rebuilding controls or moving keyboard focus.
                 if (page == SettingsPage.Advanced) UpdateProgressBar(contentHost, value);
             });
-            temp = await updates.DownloadAsync(progress, cancellation.Token);
+            temp = installer ? await updates.DownloadInstallerAsync(progress, cancellation.Token) : await updates.DownloadAsync(progress, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
-            var dialog = new Microsoft.Win32.SaveFileDialog { FileName = UpdateService.ZipName, Filter = "ZIP (*.zip)|*.zip", DefaultExt = ".zip" };
+            if (installer && installed)
+            {
+                updateMessage = "UpdateReady"; Rebuild();
+                await updates.LaunchInstallerAsync(temp, canInstallUpdate, cancellation.Token);
+                temp = null; // The external installer owns its lifetime; never delete a running EXE.
+                exitApplication();
+                return;
+            }
+            var dialog = new Microsoft.Win32.SaveFileDialog { FileName = installer ? UpdateService.InstallerName : UpdateService.ZipName, Filter = installer ? "Installer (*.exe)|*.exe" : "ZIP (*.zip)|*.zip", DefaultExt = installer ? ".exe" : ".zip" };
             if (dialog.ShowDialog(this) == true)
             {
                 string destination = dialog.FileName;
                 await Task.Run(() => File.Copy(temp, destination, true), cancellation.Token);
-                updateMessage = "UpdateSaved";
+                updateMessage = installer ? "UpdateInstallerSaved" : "UpdateSaved";
             }
         }
         catch (OperationCanceledException) { updateMessage = "UpdateCancelled"; }
-        catch (Exception e) when (e is InvalidDataException or IOException or HttpRequestException or UnauthorizedAccessException or InvalidOperationException) { updateMessage = "UpdateDownloadFailed"; }
+        catch (Exception e) when (e is InvalidDataException or IOException or HttpRequestException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { updateMessage = "UpdateInstallFailed"; }
         finally
         {
-            if (temp is not null) { try { File.Delete(temp); } catch (IOException) { } }
+            if (temp is not null) { try { File.Delete(temp); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
             downloadCancellation = null; downloadingUpdate = false;
             if (!updateLifetime.IsCancellationRequested) Rebuild();
         }

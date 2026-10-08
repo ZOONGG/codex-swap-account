@@ -169,7 +169,7 @@ public partial class App : Application
                 new StartupRegistrationService(),
                 logger,
                 backupMaintenance);
-            controller.Start();
+            controller.Start(e.Args.Contains("--updated", StringComparer.Ordinal) || e.Args.Contains("--installed", StringComparer.Ordinal));
             StartActivationListener();
             logger.Info("Overlay started.");
         }

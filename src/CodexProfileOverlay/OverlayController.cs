@@ -79,26 +79,29 @@ internal sealed class OverlayController : IDisposable
         }
     }
 
-    public void Start()
+    public void Start(bool afterInstallation = false)
     {
         EnsureOverlay();
         EnsureTray();
         RefreshProfiles();
         ApplySettings();
         timer.Start();
-        if (settings.LaunchCodexWhenOverlayStarts)
+        if (!afterInstallation && settings.LaunchCodexWhenOverlayStarts)
         {
             _ = LaunchCodexAndWaitAsync(disposalTokenSource.Token);
         }
 
         Tick();
         _ = CheckForUpdatesAtStartupAsync();
+        if (afterInstallation) overlayWindow?.ShowNotification(localizer.Format("UpdateInstalledVersion", updates.CurrentVersion));
     }
 
     private async Task CheckForUpdatesAtStartupAsync()
     {
         try { await updates.CheckAsync(false, disposalTokenSource.Token); }
         catch (OperationCanceledException) { }
+        if (updates.HasUpdate && !disposalTokenSource.IsCancellationRequested)
+            overlayWindow?.ShowNotification(localizer["UpdateAvailable"]);
     }
 
     public void Dispose()
@@ -568,7 +571,8 @@ internal sealed class OverlayController : IDisposable
             () => OpenFolder(paths.LogDirectory),
             ResetPosition,
             ResetSettings,
-            () => Application.Current.Shutdown());
+            () => Application.Current.Shutdown(),
+            () => !switching);
         settingsWindow.Closed += (_, _) => settingsWindow = null;
         ShowCodexOwnedWindow(settingsWindow);
         settingsWindow.SetConflicts(RegisterHotkeys());

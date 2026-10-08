@@ -7,18 +7,20 @@ using System.Text.RegularExpressions;
 
 namespace CodexProfileOverlay.Core.Services;
 
-public sealed record UpdateRelease(string Tag, string Url, DateTimeOffset Published, string Notes, string? Zip, string? Checksums);
+public sealed record UpdateRelease(string Tag, string Url, DateTimeOffset Published, string Notes, string? Zip, string? Checksums, string? Installer = null);
 public sealed record UpdateCache(DateTimeOffset LastAttempt, DateTimeOffset? LastSuccess, UpdateRelease? Release);
 
 /// <summary>Public release metadata only; never accesses profiles or authorization.</summary>
 public sealed class UpdateService : IDisposable
 {
     public const string ZipName = "CodexProfileOverlay-win-x64-portable.zip";
+    public const string InstallerName = "CodexSwapAccount-win-x64-setup.exe";
     public const string RepositoryUrl = "https://github.com/ZOONGG/codex-swap-account";
     private readonly HttpClient http;
     private readonly string cachePath;
     private readonly Func<DateTimeOffset> now;
     private readonly SemaphoreSlim checkGate = new(1, 1), downloadGate = new(1, 1);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> verifiedInstallers = new();
     public string CurrentVersion { get; }
     public UpdateCache Cache { get; private set; } = new(default, null, null);
     public string? ErrorKey { get; private set; }
@@ -59,7 +61,7 @@ public sealed class UpdateService : IDisposable
             string tag = root.GetProperty("tag_name").GetString() ?? throw new FormatException();
             if (ReleaseVersion.Parse(tag).Prerelease is not null) throw new FormatException();
             string? Asset(string name) => root.GetProperty("assets").EnumerateArray().FirstOrDefault(x => x.GetProperty("name").GetString() == name) is var asset && asset.ValueKind == JsonValueKind.Object ? asset.GetProperty("browser_download_url").GetString() : null;
-            var release = new UpdateRelease(tag, root.GetProperty("html_url").GetString()!, root.GetProperty("published_at").GetDateTimeOffset(), root.GetProperty("body").GetString() ?? "", Asset(ZipName), Asset("SHA256SUMS.txt"));
+            var release = new UpdateRelease(tag, root.GetProperty("html_url").GetString()!, root.GetProperty("published_at").GetDateTimeOffset(), root.GetProperty("body").GetString() ?? "", Asset(ZipName), Asset("SHA256SUMS.txt"), Asset(InstallerName));
             if (!ValidRelease(release)) throw new FormatException();
             Cache = Cache with { LastSuccess = now(), Release = release };
             ErrorKey = null;
@@ -75,9 +77,11 @@ public sealed class UpdateService : IDisposable
     {
         if (string.IsNullOrEmpty(r.Tag) || string.IsNullOrEmpty(r.Url) || r.Notes is null) return false;
         _ = ReleaseVersion.Parse(r.Tag);
+        if (ReleaseVersion.Parse(r.Tag).Prerelease is not null) return false;
         string prefix = RepositoryUrl + "/releases/tag/";
         return r.Url.StartsWith(prefix, StringComparison.Ordinal) && Uri.TryCreate(r.Url, UriKind.Absolute, out var uri) && uri.Query == "" && uri.Fragment == "" && Uri.UnescapeDataString(uri.AbsolutePath[(new Uri(prefix).AbsolutePath.Length)..]) == r.Tag
-            && (r.Zip is null || ValidAsset(r.Zip, r.Tag, ZipName)) && (r.Checksums is null || ValidAsset(r.Checksums, r.Tag, "SHA256SUMS.txt"));
+            && (r.Zip is null || ValidAsset(r.Zip, r.Tag, ZipName)) && (r.Checksums is null || ValidAsset(r.Checksums, r.Tag, "SHA256SUMS.txt"))
+            && (r.Installer is null || ValidAsset(r.Installer, r.Tag, InstallerName));
     }
 
     private static bool ValidAsset(string url, string tag, string name) =>
@@ -86,27 +90,54 @@ public sealed class UpdateService : IDisposable
         && Uri.UnescapeDataString(uri.AbsolutePath) == "/ZOONGG/codex-swap-account/releases/download/" + tag + "/" + name;
 
     public async Task<string> DownloadAsync(IProgress<double>? progress = null, CancellationToken cancellation = default)
+        => await DownloadAssetAsync(false, progress, cancellation).ConfigureAwait(false);
+
+    public Task<string> DownloadInstallerAsync(IProgress<double>? progress = null, CancellationToken cancellation = default)
+        => DownloadAssetAsync(true, progress, cancellation);
+
+    private async Task<string> DownloadAssetAsync(bool installer, IProgress<double>? progress, CancellationToken cancellation)
     {
         if (!await downloadGate.WaitAsync(0, cancellation).ConfigureAwait(false)) throw new InvalidOperationException("Download already running.");
-        string temp = Path.Combine(Path.GetTempPath(), "codex-update-" + Guid.NewGuid().ToString("N") + ".zip");
+        string name = installer ? InstallerName : ZipName;
+        string temp = Path.Combine(Path.GetTempPath(), "codex-update-" + Guid.NewGuid().ToString("N") + (installer ? ".exe" : ".zip"));
         try
         {
             var r = Cache.Release;
-            if (!HasUpdate || r is null || !ValidRelease(r) || r.Zip is null || r.Checksums is null) throw new InvalidDataException("Missing official release assets.");
+            if (!HasUpdate || r is null || !ValidRelease(r) || r.Checksums is null) throw new InvalidDataException("Missing official release assets.");
+            string url = (installer ? r.Installer : r.Zip) ?? throw new InvalidDataException("Missing official release asset.");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(TimeSpan.FromMinutes(15));
             byte[] sums = await ReadAsync(new Uri(r.Checksums), 64 * 1024, timeout.Token).ConfigureAwait(false);
-            var matches = Regex.Matches(Encoding.UTF8.GetString(sums), @"(?m)^([a-fA-F0-9]{64}) [ *]" + Regex.Escape(ZipName) + @"\r?$");
+            var matches = Regex.Matches(Encoding.UTF8.GetString(sums), @"(?m)^([a-fA-F0-9]{64}) [ *]" + Regex.Escape(name) + @"\r?$");
             if (matches.Count != 1) throw new InvalidDataException("Missing or malformed SHA-256 checksum.");
             await using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
-                await TransferAsync(new Uri(r.Zip), file, 512L * 1024 * 1024, progress, timeout.Token).ConfigureAwait(false);
+                await TransferAsync(new Uri(url), file, 512L * 1024 * 1024, progress, timeout.Token).ConfigureAwait(false);
             await using var input = File.OpenRead(temp);
             byte[] actual = await SHA256.HashDataAsync(input, timeout.Token).ConfigureAwait(false);
             if (!CryptographicOperations.FixedTimeEquals(actual, Convert.FromHexString(matches[0].Groups[1].Value))) throw new InvalidDataException("SHA-256 mismatch.");
             cancellation.ThrowIfCancellationRequested();
+            if (installer) verifiedInstallers[temp] = actual;
             return temp;
         }
         catch { if (File.Exists(temp)) File.Delete(temp); throw; }
+        finally { downloadGate.Release(); }
+    }
+
+    public async Task LaunchInstallerAsync(string path, Func<bool> mayInstall, CancellationToken cancellation = default)
+    {
+        if (!await downloadGate.WaitAsync(0, cancellation)) throw new InvalidOperationException("Update already running.");
+        try
+        {
+            if (!verifiedInstallers.TryRemove(path, out var expected)) throw new InvalidDataException("Installer was not verified.");
+            // Deny writes/deletion between revalidation and CreateProcess.
+            await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            var actual = await SHA256.HashDataAsync(file, cancellation);
+            if (!CryptographicOperations.FixedTimeEquals(expected, actual)) throw new InvalidDataException("Installer changed after verification.");
+            cancellation.ThrowIfCancellationRequested();
+            if (!mayInstall()) throw new InvalidOperationException("Installation is unavailable during account switching or in portable mode.");
+            using var process = System.Diagnostics.Process.Start(InstallerLaunch.Create(path))
+                ?? throw new IOException("Could not start installer.");
+        }
         finally { downloadGate.Release(); }
     }
 
