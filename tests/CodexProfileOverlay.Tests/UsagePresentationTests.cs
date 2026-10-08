@@ -18,6 +18,18 @@ public sealed class UsagePresentationTests
     public void Tray_SelectsRemainingWindow(TrayUsageMode mode, int? expected) =>
         Assert.Equal(expected, UsageDisplayFormatter.TrayPercent(Snapshot(), mode, Now, TimeSpan.FromMinutes(90)));
 
+    [Theory]
+    [InlineData(false, "Just now", "2m ago", "In less than a minute", "Usage refresh timed out")]
+    [InlineData(true, "Только что", "2 мин назад", "Менее чем через минуту", "Время ожидания обновления истекло")]
+    public void Details_LocalizeAgeShortCountdownAndErrors(bool russian, string recent, string minutes, string countdown, string timeout)
+    {
+        Assert.Equal(recent, UsageDisplayFormatter.UpdatedAgo(Now.AddSeconds(5), Now, russian));
+        Assert.Equal(minutes, UsageDisplayFormatter.UpdatedAgo(Now.AddMinutes(-2), Now, russian));
+        Assert.Equal(countdown, UsageDisplayFormatter.Countdown(Now.AddSeconds(30), Now, russian));
+        Assert.Equal(timeout, UsageDisplayFormatter.RefreshError("Usage refresh timed out", russian));
+        Assert.DoesNotContain("private-provider-detail", UsageDisplayFormatter.RefreshError("private-provider-detail", russian));
+    }
+
     [Fact]
     public void Tray_HidesUnknownStaleExpiredAndMissingWindows()
     {

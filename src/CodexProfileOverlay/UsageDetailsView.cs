@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -21,6 +22,7 @@ internal static class UsageDetailsView
         if (recommended) Text(localizer["RecommendedProfile"]);
         var now = DateTimeOffset.UtcNow;
         bool russian = LocalizationCatalog.Resolve(settings.Language) == LanguagePreference.Russian;
+        var culture = CultureInfo.GetCultureInfo(russian ? "ru-RU" : "en-US");
         if (snapshot is null || UsageIntelligence.GetKnownWindows(snapshot).Count == 0) Text(localizer["NoReliableUsageData"]);
         if (snapshot is not null)
         {
@@ -35,13 +37,14 @@ internal static class UsageDetailsView
                 if (window.ResetAt is { } reset)
                 {
                     Text(UsageDisplayFormatter.Countdown(reset, now, russian));
-                    Text($"{localizer["ResetsAt"]}: {UsageDisplayFormatter.FormatLocal(reset)}");
+                    Text($"{localizer["ResetsAt"]}: {UsageDisplayFormatter.FormatLocal(reset, culture)}");
                 }
             }
-            Text($"{localizer["LastUpdated"]}: {UsageDisplayFormatter.FormatLocal(snapshot.CapturedAt)}");
+            Text($"{localizer["LastUpdated"]}: {UsageDisplayFormatter.UpdatedAgo(snapshot.CapturedAt, now, russian)}");
+            Text(UsageDisplayFormatter.FormatLocal(snapshot.CapturedAt, culture));
             if (UsageIntelligence.IsStale(snapshot, now, TimeSpan.FromMinutes(settings.StaleDataThresholdMinutes))) Text(localizer["UsageDataStale"]);
         }
-        if (!string.IsNullOrWhiteSpace(error)) Text(localizer["RefreshError"] + ": " + error);
+        if (!string.IsNullOrWhiteSpace(error)) Text(localizer["RefreshError"] + ": " + UsageDisplayFormatter.RefreshError(error, russian));
         var button = new Button { Content = localizer["RefreshNow"], HorizontalAlignment = HorizontalAlignment.Left };
         button.Click += async (_, _) => {
             button.IsEnabled = false;

@@ -8,8 +8,26 @@ public static class UsageDisplayFormatter
     {
         var left = reset - now;
         if (left <= TimeSpan.Zero) return russian ? "Ожидается обновление" : "Awaiting refresh";
+        if (left.TotalMinutes < 1) return russian ? "Менее чем через минуту" : "In less than a minute";
         if (left.TotalDays >= 1) return russian ? $"Через {(int)left.TotalDays} д {(int)left.Hours} ч" : $"In {(int)left.TotalDays}d {left.Hours}h";
         return russian ? $"Через {(int)left.TotalHours} ч {left.Minutes} мин" : $"In {(int)left.TotalHours}h {left.Minutes}m";
+    }
+
+    public static string RefreshError(string error, bool russian) => error switch
+    {
+        "Automatic limits unavailable" => russian ? "Автоматические лимиты недоступны" : "Automatic limits unavailable",
+        "Usage source returned no data" => russian ? "Источник не вернул данные" : "Usage source returned no data",
+        "Usage refresh timed out" => russian ? "Время ожидания обновления истекло" : "Usage refresh timed out",
+        _ => russian ? "Не удалось обновить лимиты" : "Usage refresh failed",
+    };
+
+    public static string UpdatedAgo(DateTimeOffset capturedAt, DateTimeOffset now, bool russian)
+    {
+        var age = now - capturedAt;
+        if (age.TotalMinutes < 1) return russian ? "Только что" : "Just now";
+        if (age.TotalHours < 1) return russian ? $"{(int)age.TotalMinutes} мин назад" : $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalDays < 1) return russian ? $"{(int)age.TotalHours} ч назад" : $"{(int)age.TotalHours}h ago";
+        return russian ? $"{(int)age.TotalDays} д назад" : $"{(int)age.TotalDays}d ago";
     }
 
     public static int? TrayPercent(Models.UsageSnapshot? snapshot, Models.TrayUsageMode mode, DateTimeOffset now, TimeSpan threshold)
