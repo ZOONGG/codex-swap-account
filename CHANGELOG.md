@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Compact icon-only Settings actions; the applied confirmation fades after two seconds and clears on navigation.
+- Open support as an embedded, keyboard-accessible Settings overlay with rounded amount inputs, Telegram star artwork and branded cryptocurrency icons.
+
 - Hardened Windows Codex Desktop identity using the official package family and registered manifest executable, including packages whose desktop process is `ChatGPT.exe`.
 - Track desktop descendants with retained handles, handle respawns, and require a stable 750 ms exit before replacing authorization. Preflight registered application activation before shutdown when automatic relaunch is enabled.
 - Remove only the known stale Codex tray GUID after verified shutdown; cleanup failure logs a safe warning and does not prevent account switching.

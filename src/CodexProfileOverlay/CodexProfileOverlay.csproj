@@ -14,6 +14,8 @@
   <ItemGroup>
     <Resource Include="Assets\AppIcon.ico" />
     <Resource Include="Assets\AppIcon.png" />
+    <Resource Include="Assets\Support\*.png" />
+    <Content Include="Assets\Support\*LICENSE*;Assets\Support\NOTICE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\CodexProfileOverlay.Core\CodexProfileOverlay.Core.csproj" />

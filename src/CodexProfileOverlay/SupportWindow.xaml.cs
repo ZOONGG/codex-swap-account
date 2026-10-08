@@ -18,6 +18,8 @@ namespace CodexProfileOverlay;
 
 public partial class SupportWindow : Window
 {
+    private Action? embeddedClose;
+    private FrameworkElement? embeddedPanel;
     private readonly AppTheme theme;
     private readonly bool russian;
     private HttpClient? httpClient;
@@ -40,6 +42,41 @@ public partial class SupportWindow : Window
         PreviewKeyDown += OnPreviewKeyDown;
     }
 
+    internal FrameworkElement CreateEmbeddedPanel(Action close, double availableHeight)
+    {
+        embeddedClose = close;
+        BodyScroll.MaxHeight = Math.Max(100, availableHeight - 160);
+        var panel = (FrameworkElement)Content;
+        Content = null;
+        panel.Resources = Resources;
+        panel.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "StrongTextBrush");
+        panel.PreviewKeyDown += OnPreviewKeyDown;
+        KeyboardNavigation.SetTabNavigation(panel, KeyboardNavigationMode.Cycle);
+        KeyboardNavigation.SetControlTabNavigation(panel, KeyboardNavigationMode.Cycle);
+        panel.Loaded += OnLoaded;
+        embeddedPanel = panel;
+        return panel;
+    }
+
+    internal void UpdateEmbeddedHeight(double availableHeight) => BodyScroll.MaxHeight = Math.Max(100, availableHeight - 160);
+
+    internal void DisposeEmbedded()
+    {
+        if (embeddedPanel is { } panel)
+        {
+            panel.Loaded -= OnLoaded;
+            panel.PreviewKeyDown -= OnPreviewKeyDown;
+        }
+        OnClosed(this, EventArgs.Empty);
+        Close();
+    }
+
+    private void RequestClose()
+    {
+        if (embeddedClose is { } close) close();
+        else Close();
+    }
+
     private CultureInfo AmountCulture => russian
         ? CultureInfo.GetCultureInfo("ru-RU")
         : CultureInfo.GetCultureInfo("en-US");
@@ -48,8 +85,10 @@ public partial class SupportWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        ClampToWorkArea();
+        if (embeddedClose is null) ClampToWorkArea();
+        CloseButton.Focus();
         dialogCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = dialogCancellation.Token;
         SupportApiConfiguration configuration = SupportApiConfiguration.Load();
         if (!configuration.IsConfigured)
         {
@@ -65,9 +104,9 @@ public partial class SupportWindow : Window
         flow.StateChanged += Flow_StateChanged;
         try
         {
-            await flow.LoadAsync(dialogCancellation.Token);
+            await flow.LoadAsync(cancellationToken);
         }
-        catch (OperationCanceledException) when (dialogCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
     }
@@ -94,7 +133,7 @@ public partial class SupportWindow : Window
     {
         if (e.Key == Key.Escape)
         {
-            Close();
+            RequestClose();
             e.Handled = true;
         }
     }
@@ -108,6 +147,7 @@ public partial class SupportWindow : Window
 
     private void ApplyLocalizedText()
     {
+        AutomationProperties.SetName(CloseButton, T("Закрыть поддержку", "Close support"));
         Title = T("Поддержать Codex Swap Account", "Support Codex Swap Account");
         SupportTitle.Text = T("Поддержать Codex Swap Account", "Support Codex Swap Account");
         SupportSubtitle.Text = T("Приложение бесплатно и имеет открытый исходный код.", "The app is free and open source.");
@@ -223,7 +263,7 @@ public partial class SupportWindow : Window
 
     private void UpdateSupportState()
     {
-        if (!IsLoaded || flow is null)
+        if (!(embeddedPanel?.IsLoaded ?? IsLoaded) || flow is null)
         {
             return;
         }
@@ -317,7 +357,7 @@ public partial class SupportWindow : Window
 
         SetAmountControlsEnabled(true);
         ContinueButton.Content = T("Продолжить", "Continue");
-        AmountSuffixText.Text = IsCrypto(method.Id) ? "$" : "★";
+        AmountSuffixText.Content = IsCrypto(method.Id) ? new TextBlock { Text = "$" } : SupportIcons.Vector(SupportIcons.Star, new SolidColorBrush(Color.FromRgb(245, 184, 46)), 20);
         string range = method.Custom.Max is { } maximum
             ? $"{method.Custom.Min:N0}–{maximum:N0} {method.Currency}"
             : $"≥ {method.Custom.Min:N0} {method.Currency}";
@@ -329,7 +369,7 @@ public partial class SupportWindow : Window
             var button = new RadioButton
             {
                 Tag = amount,
-                Content = IsCrypto(method.Id) ? $"${amount:N0}" : $"{amount:N0} ★",
+                Content = AmountContent(amount, IsCrypto(method.Id)),
                 GroupName = "SupportAmount",
                 Style = (Style)FindResource("SupportAmountSelector"),
             };
@@ -339,6 +379,19 @@ public partial class SupportWindow : Window
         }
 
         RefreshAmountSelection();
+    }
+
+    private UIElement AmountContent(int amount, bool crypto)
+    {
+        var content = new StackPanel { Orientation = Orientation.Horizontal };
+        content.Children.Add(new TextBlock { Text = crypto ? $"${amount:N0}" : $"{amount:N0}", VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeights.SemiBold });
+        if (!crypto)
+        {
+            var star = SupportIcons.Vector(SupportIcons.Star, new SolidColorBrush(Color.FromRgb(245, 184, 46)), 18);
+            star.Margin = new Thickness(8, 0, 0, 0);
+            content.Children.Add(star);
+        }
+        return content;
     }
 
     private void RenderAssets()
@@ -362,22 +415,7 @@ public partial class SupportWindow : Window
         for (int index = 0; index < assets.Length; index++)
         {
             SupportAsset asset = assets[index];
-            var icon = new Border
-            {
-                Width = 36,
-                Height = 36,
-                CornerRadius = new CornerRadius(18),
-                Background = AssetBrush(asset.Asset),
-                Child = new TextBlock
-                {
-                    Text = AssetMonogram(asset.Asset),
-                    Foreground = Brushes.White,
-                    FontSize = 11,
-                    FontWeight = FontWeights.Bold,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                },
-            };
+            var icon = SupportIcons.Coin(asset.Asset);
             var labels = new StackPanel
             {
                 Margin = new Thickness(9, 0, 0, 0),
@@ -553,7 +591,7 @@ public partial class SupportWindow : Window
         CheckoutAmountText.Text = crypto
             ? checkout.CryptoAmount ?? string.Empty
             : checkout.Amount.ToString("N0", AmountCulture);
-        CheckoutAmountSuffix.Text = crypto ? checkout.Asset : "★";
+        CheckoutAmountSuffix.Content = crypto ? SupportIcons.Coin(checkout.Asset ?? "", 26) : SupportIcons.Vector(SupportIcons.Star, new SolidColorBrush(Color.FromRgb(245, 184, 46)), 26);
         QrFrame.Width = crypto ? 220 : 248;
         QrFrame.Height = crypto ? 220 : 248;
         OpenTelegramButton.Visibility = crypto ? Visibility.Collapsed : Visibility.Visible;
@@ -713,7 +751,7 @@ public partial class SupportWindow : Window
         flow.ChangeAmount();
     }
 
-    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+    private void CloseButton_Click(object sender, RoutedEventArgs e) => RequestClose();
 
     private void ShowOnly(FrameworkElement panel)
     {
@@ -760,28 +798,6 @@ public partial class SupportWindow : Window
 
     private static bool IsCrypto(string? methodId) =>
         string.Equals(methodId, "direct_crypto", StringComparison.OrdinalIgnoreCase);
-
-    private static string AssetMonogram(string asset) => asset.Length <= 4 ? asset : asset[..4];
-
-    private static Brush AssetBrush(string asset)
-    {
-        string color = asset.ToUpperInvariant() switch
-        {
-            "BTC" => "#F7931A",
-            "ETH" => "#627EEA",
-            "USDT" => "#26A17B",
-            "USDC" => "#2775CA",
-            "SOL" => "#7C5CFC",
-            "DOGE" => "#C2A633",
-            "LTC" => "#345D9D",
-            "BNB" => "#D6A51E",
-            "LINK" => "#2A5ADA",
-            "TRX" => "#D93636",
-            "DAI" => "#F5AC37",
-            _ => "#6D4AFF",
-        };
-        return new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-    }
 
     private Brush Brush(string key) => (Brush)FindResource(key);
 }

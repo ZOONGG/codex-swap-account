@@ -43,6 +43,9 @@ internal sealed class SettingsWindow : Window
     private readonly Action exitApplication;
     private readonly Localizer localizer;
     private readonly Grid contentHost = new();
+    private readonly Grid modalHost = new();
+    private readonly System.Windows.Threading.DispatcherTimer appliedTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private Action? dismissSupport;
     private readonly TextBlock pageTitle = new();
     private readonly TextBlock statusText = new();
     private readonly StackPanel navPanel = new();
@@ -117,12 +120,15 @@ internal sealed class SettingsWindow : Window
         ApplySavedGeometry();
 
         Content = BuildShell();
+        appliedTimer.Tick += (_, _) => { appliedTimer.Stop(); statusText.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(220))); };
         localizer.LanguageChanged += Rebuild;
         PreviewMouseDown += OnPreviewMouseDownCommitNumber;
         Rebuild();
         Closing += (_, _) => SaveGeometry();
         Closed += (_, _) =>
         {
+            appliedTimer.Stop();
+            dismissSupport?.Invoke();
             updates.Changed -= UpdateChanged;
             updateLifetime.Cancel();
             downloadCancellation?.Cancel();
@@ -200,10 +206,10 @@ internal sealed class SettingsWindow : Window
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        githubButton = new Button { MinWidth = 92, Margin = new Thickness(0, 0, 8, 0) };
+        githubButton = new Button { Width = 36, Height = 36, MinHeight = 36, MinWidth = 36, Padding = new Thickness(0), Margin = new Thickness(0, 0, 8, 0) };
         githubButton.Click += (_, _) => OpenExternalUrl("https://github.com/ZOONGG/codex-swap-account");
         headerActions.Children.Add(githubButton);
-        supportButton = new Button { MinWidth = 110, Margin = new Thickness(0, 0, 8, 0) };
+        supportButton = new Button { Width = 36, Height = 36, MinHeight = 36, MinWidth = 36, Padding = new Thickness(0), Margin = new Thickness(0, 0, 8, 0) };
         supportButton.Click += (_, _) => OpenSupport();
         headerActions.Children.Add(supportButton);
         themeButton = CreateThemeButton();
@@ -232,6 +238,10 @@ internal sealed class SettingsWindow : Window
         footer.Children.Add(close);
         Grid.SetRow(footer, 2);
         main.Children.Add(footer);
+        Grid.SetColumnSpan(modalHost, 2);
+        Panel.SetZIndex(modalHost, 100);
+        modalHost.Visibility = Visibility.Collapsed;
+        root.Children.Add(modalHost);
         return root;
     }
 
@@ -303,6 +313,9 @@ internal sealed class SettingsWindow : Window
                 return;
             }
 
+            appliedTimer.Stop();
+            statusText.BeginAnimation(OpacityProperty, null);
+            statusText.Text = string.Empty;
             page = target;
             Rebuild();
         };
@@ -313,9 +326,10 @@ internal sealed class SettingsWindow : Window
     {
         var button = new Button
         {
-            Width = 44,
-            Height = 40,
-            MinWidth = 44,
+            Width = 36,
+            Height = 36,
+            MinHeight = 36,
+            MinWidth = 36,
             Padding = new Thickness(0),
             Background = Brush("Surface2Brush"),
             BorderBrush = Brush("BorderBrush"),
@@ -333,31 +347,15 @@ internal sealed class SettingsWindow : Window
     {
         if (githubButton is not null)
         {
-            githubButton.Content = "GitHub";
+            githubButton.Content = SupportIcons.Vector(SupportIcons.Github, Brush("StrongTextBrush"), 18);
+            System.Windows.Automation.AutomationProperties.SetName(githubButton, "GitHub");
             githubButton.ToolTip = "https://github.com/ZOONGG/codex-swap-account";
         }
 
         if (supportButton is not null)
         {
-            var content = new StackPanel { Orientation = Orientation.Horizontal };
-            content.Children.Add(new Viewbox
-            {
-                Width = 16,
-                Height = 16,
-                Margin = new Thickness(0, 0, 7, 0),
-                Child = new System.Windows.Shapes.Path
-                {
-                    Data = Geometry.Parse("M12,21 L3,12 C-3,5 6,-1 12,6 C18,-1 27,5 21,12 Z"),
-                    Fill = Brush("ErrorBrush"),
-                    Stretch = Stretch.Uniform,
-                },
-            });
-            content.Children.Add(new TextBlock
-            {
-                Text = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "Поддержать" : "Support",
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-            supportButton.Content = content;
+            supportButton.Content = SupportIcons.Vector(SupportIcons.Heart, Brush("ErrorBrush"), 18);
+            System.Windows.Automation.AutomationProperties.SetName(supportButton, LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "Поддержать" : "Support");
             supportButton.ToolTip = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian
                 ? "Поддержать развитие Codex Swap Account"
                 : "Support Codex Swap Account development";
@@ -366,8 +364,39 @@ internal sealed class SettingsWindow : Window
 
     private void OpenSupport()
     {
-        var support = new SupportWindow(settings.Theme, localizer.Language) { Owner = this };
-        _ = support.ShowDialog();
+        if (dismissSupport is not null) return;
+        CommitFocusedNumber();
+        var previousFocus = Keyboard.FocusedElement;
+        var support = new SupportWindow(settings.Theme, localizer.Language);
+        var shell = (Grid)Content;
+        foreach (UIElement child in shell.Children) if (child != modalHost) child.IsEnabled = false;
+        modalHost.Background = new SolidColorBrush(Color.FromArgb(140, 0, 0, 0));
+        modalHost.Visibility = Visibility.Visible;
+        SizeChangedEventHandler resize = (_, _) =>
+        {
+            double height = Math.Max(200, ActualHeight - 80);
+            support.UpdateEmbeddedHeight(height);
+            if (modalHost.Children.Count > 0) ((FrameworkElement)modalHost.Children[0]).MaxHeight = height;
+        };
+        SizeChanged += resize;
+        dismissSupport = () =>
+        {
+            SizeChanged -= resize;
+            support.DisposeEmbedded();
+            modalHost.Children.Clear();
+            modalHost.Visibility = Visibility.Collapsed;
+            foreach (UIElement child in shell.Children) if (child != modalHost) child.IsEnabled = true;
+            dismissSupport = null;
+            previousFocus?.Focus();
+        };
+        var panel = support.CreateEmbeddedPanel(() => dismissSupport?.Invoke(), Math.Max(200, ActualHeight - 80));
+        panel.Width = 600;
+        panel.MaxHeight = Math.Max(200, ActualHeight - 80);
+        panel.HorizontalAlignment = HorizontalAlignment.Center;
+        panel.VerticalAlignment = VerticalAlignment.Center;
+        modalHost.Children.Add(panel);
+        panel.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160)));
+
     }
 
     private static void OpenExternalUrl(string url)
@@ -390,6 +419,7 @@ internal sealed class SettingsWindow : Window
 
         bool light = settings.Theme == AppTheme.Light;
         themeButton.ToolTip = light ? localizer["SwitchToDarkTheme"] : localizer["SwitchToLightTheme"];
+        System.Windows.Automation.AutomationProperties.SetName(themeButton, (string)themeButton.ToolTip);
         themeButton.Content = CreateThemeIcon(light);
         themeButton.Background = Brush(light ? "TabActiveBrush" : "Surface2Brush");
         themeButton.BorderBrush = Brush(light ? "AccentBrush" : "BorderBrush");
@@ -846,7 +876,7 @@ internal sealed class SettingsWindow : Window
             {
                 commit(box.Text);
                 statusText.Foreground = Brush("SuccessBrush");
-                statusText.Text = localizer["Applied"];
+                ShowApplied();
             }
             catch (Exception exception) when (exception is ArgumentException or FormatException)
             {
@@ -1614,17 +1644,29 @@ internal sealed class SettingsWindow : Window
         }
     }
 
+    private void ShowApplied()
+    {
+        statusText.BeginAnimation(OpacityProperty, null);
+        statusText.Opacity = 1;
+        statusText.Text = localizer["Applied"];
+        appliedTimer.Stop();
+        appliedTimer.Start();
+    }
+
     private void Save()
     {
         try
         {
             statusText.Foreground = Brush("SuccessBrush");
-            statusText.Text = localizer["Applied"];
+            ShowApplied();
             save(settings);
         }
         catch (Exception)
         {
             statusText.Foreground = Brush("ErrorBrush");
+            appliedTimer.Stop();
+            statusText.BeginAnimation(OpacityProperty, null);
+            statusText.Opacity = 1;
             statusText.Text = localizer["CouldNotSaveSettings"];
         }
     }
