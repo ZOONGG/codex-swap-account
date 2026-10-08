@@ -581,6 +581,11 @@ internal sealed class SettingsWindow : Window
         };
 
         stack.Children.Add(Card(rows.ToArray()));
+        stack.Children.Add(Card(
+            new TextBlock { Text = localizer["TokenStatistics"], FontSize = 18, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) },
+            new TextBlock { Text = localizer["TokenStatisticsSource"], Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 8) },
+            new TextBlock { Text = localizer["TokenStatisticsMissing"], TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) },
+            new TextBlock { Text = localizer["TokenStatisticsDisabled"], TextWrapping = TextWrapping.Wrap, Foreground = Brush("MutedTextBrush") }));
         stack.Children.Add(BuildManualStatusEditor(providerSupported));
         var usageDocument = statusService.Load();
         var recommended = statusService.FindRecommendedProfile(profiles.Select(p => p.Name).ToArray(), usageDocument);
