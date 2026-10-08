@@ -14,6 +14,20 @@ internal static class Program
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr handle);
 
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowStyle(IntPtr handle, int index);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
+
+    private static void CheckChrome(Window window)
+    {
+        var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        long style = GetWindowStyle(handle, -16).ToInt64();
+        Check((style & 0x20000) == 0 && (style & 0x10000) != 0 && (style & 0x40000) != 0, "Auxiliary chrome must disable minimize and preserve maximize/resize");
+        SendMessage(handle, 0x112, (IntPtr)0xF020, IntPtr.Zero);
+        Check(window.IsVisible && window.WindowState != WindowState.Minimized, "Native minimize command must not create desktop strip");
+    }
+
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
     private static object Field(object target, string name) => target.GetType().GetField(name, Private)!.GetValue(target)!;
     private static object? Invoke(object target, string name, params object[] args) => target.GetType().GetMethod(name, Private)!.Invoke(target, args);
@@ -38,10 +52,11 @@ internal static class Program
             {
                 App.ApplyTheme(theme);
                 CheckSettings(temp, theme, language);
+                CheckProfileManager(language);
                 CheckAmounts(theme, language);
                 CheckPopup(temp, language);
             }
-            Console.WriteLine("PASS: Popup profile anchoring in expanded/compact modes; Settings X/minimize/reopen; Stars/Crypto presets/manual input; input rendering; scrollbar dark/light and RU/EN.");
+            Console.WriteLine("PASS: Left info/bottom popup in expanded/compact modes; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto presets/manual input; input rendering; scrollbar dark/light and RU/EN.");
         }
         finally { app.Shutdown(); Directory.Delete(temp, true); }
     }
@@ -76,16 +91,59 @@ internal static class Program
         Check(!window.IsVisible && !IsWindowVisible(new System.Windows.Interop.WindowInteropHelper(window).Handle), "Settings X must hide native window");
         window.Show();
         Check(window.IsVisible, "Settings must reopen after X");
-        window.WindowState = WindowState.Minimized;
-        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-        Check(!window.IsVisible && !IsWindowVisible(new System.Windows.Interop.WindowInteropHelper(window).Handle) && window.WindowState == WindowState.Normal, "Settings minimize must hide native window and normalize");
-        window.Show(); window.Activate(); window.UpdateLayout();
-        Check(window.IsVisible && window.Width == width && window.Height == height && window.Left == left && window.Top == top, $"Settings must retain geometry on reopen: {left},{top} {width}x{height} -> {window.Left},{window.Top} {window.Width}x{window.Height}");
+        CheckChrome(window);
+        window.WindowState = WindowState.Maximized;
+        window.Close();
+        window.Show();
+        Check(window.IsVisible && window.WindowState == WindowState.Maximized, "Settings must reopen maximized");
+        window.WindowState = WindowState.Normal;
+        window.UpdateLayout();
+        Check(window.Width == width && window.Height == height && window.Left == left && window.Top == top, "Settings must retain restore geometry");
+        foreach (string name in new[] { "githubButton", "supportButton", "themeButton" })
+        {
+            var button = (Button)Field(window, name);
+            button.Focus(); button.ApplyTemplate();
+            var chrome = (Border)button.Template.FindName("Chrome", button);
+            Check(Equals(chrome.BorderBrush, button.BorderBrush), "Programmatic/mouse focus must not look selected: " + name);
+            Check(button.FocusVisualStyle is not null, "Keyboard focus must retain accessible visual: " + name);
+        }
+        Invoke(window, "OpenSupport");
+        ((Action)Field(window, "dismissSupport"))();
+        Check(!((Grid)Field(window, "modalHost")).IsVisible, "Support dismissal must restore settings");
         var bar = new ScrollBar { Orientation = Orientation.Vertical, Maximum = 100, ViewportSize = 20 };
         bar.Style = (Style)appResource(typeof(ScrollBar));
         bar.Measure(new Size(10, 300)); bar.Arrange(new Rect(0, 0, 10, 300)); bar.ApplyTemplate();
         Check(bar.ActualHeight == 300 && bar.Template.FindName("PART_Track", bar) is Track, "Scrollbar must fill vertical track");
         window.GetType().GetMethod("CloseForShutdown")!.Invoke(window, null);
+    }
+
+    private static void CheckProfileManager(LanguagePreference language)
+    {
+        var assembly = typeof(App).Assembly;
+        var localizerType = assembly.GetType("CodexProfileOverlay.Localizer")!;
+        var ctor = assembly.GetType("CodexProfileOverlay.ProfileManagerWindow")!.GetConstructors().Single();
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            object?[] args = ctor.GetParameters().Select(p =>
+                p.ParameterType == typeof(IReadOnlyList<ProfileInfo>) ? (object)Array.Empty<ProfileInfo>() :
+                p.ParameterType == typeof(string) ? null :
+                p.ParameterType == localizerType ? Activator.CreateInstance(localizerType, language) :
+                p.ParameterType == typeof(Action<ProfileInfo>) ? (Action<ProfileInfo>)(_ => { }) :
+                p.ParameterType == typeof(Action<IReadOnlyList<string>>) ? (Action<IReadOnlyList<string>>)(_ => { }) :
+                p.ParameterType == typeof(Func<ProfileInfo, AccountAvailability>) ? (Func<ProfileInfo, AccountAvailability>)(_ => default) :
+                (object)(Action)(() => { })).ToArray();
+            var window = (Window)ctor.Invoke(args);
+            window.ShowInTaskbar = false;
+            window.Show();
+            CheckChrome(window);
+            window.Hide();
+            Check(!IsWindowVisible(new System.Windows.Interop.WindowInteropHelper(window).Handle), "Profile hide must hide native window");
+            window.Show();
+            Check(window.IsVisible && window.WindowState == WindowState.Normal, "Profile manager must reopen normally");
+            var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            window.Close();
+            Check(!IsWindowVisible(handle), "Profile close must destroy native window");
+        }
     }
 
     private static void CheckPopup(string temp, LanguagePreference language)
@@ -112,9 +170,12 @@ internal static class Program
             }
             else shell.Child = row;
             row.UpdateLayout();
+            Check(DockPanel.GetDock(row.Children[0]) == Dock.Left, "Info must precede its account");
+            Check(row.Children[1] == account, "Info must belong to the adjacent profile");
             ((Button)row.Children[0]).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             var popup = (Popup)Field(window, "usagePopup");
+            Check(popup.Placement == PlacementMode.Bottom, "Usage popup must retain original bottom placement");
             Check(popup.IsOpen && ReferenceEquals(popup.PlacementTarget, account), "Usage popup must anchor to selected profile");
             Check(!compact || compactPopup.IsOpen, "Compact profile anchor must remain visible");
             var panel = (FrameworkElement)popup.Child;
@@ -134,6 +195,31 @@ internal static class Program
         using var http = new HttpClient();
         using var flow = new SupportFlowController(new SupportApiClient(http, new Uri("https://support.example.test/")));
         window.GetType().GetField("flow", Private)!.SetValue(window, flow);
+        // Exercise loaded method UI without contacting a support service.
+        window.Loaded -= (RoutedEventHandler)Delegate.CreateDelegate(typeof(RoutedEventHandler), window,
+            window.GetType().GetMethod("OnLoaded", Private | BindingFlags.DeclaredOnly)!);
+        typeof(SupportFlowController).GetProperty("Methods")!.SetValue(flow, new[]
+        {
+            new SupportMethod("telegram_stars", true, "XTR", new[] { 50 }, new SupportCustomAmount(true, 1, 10000)),
+            new SupportMethod("direct_crypto", true, "USD", new[] { 25 }, new SupportCustomAmount(true, 1, 10000)),
+        });
+        typeof(SupportFlowController).GetProperty("State")!.SetValue(flow, SupportFlowState.ChoosingAmount);
+        window.Show();
+        for (int opening = 0; opening < 2; opening++)
+        {
+            Invoke(window, "UpdateSupportState");
+            window.UpdateLayout();
+            Check(((Button)Field(window, "CloseButton")).IsKeyboardFocused, "Method chooser must focus close rather than a payment method");
+            foreach (string name in new[] { "TelegramMethodButton", "CryptoMethodButton" })
+            {
+                var methodButton = (Button)Field(window, name);
+                methodButton.ApplyTemplate();
+                var surface = (Border)methodButton.Template.FindName("Surface", methodButton);
+                Check(!methodButton.IsKeyboardFocused && Equals(surface.BorderBrush, methodButton.BorderBrush), "Payment method must start neutral: " + name);
+                Check(methodButton.FocusVisualStyle is not null, "Payment methods must retain keyboard focus indication");
+            }
+            window.Hide(); window.Show();
+        }
         foreach (var pair in new[] { ("telegram_stars", 50), ("direct_crypto", 25) })
         {
             var method = new SupportMethod(pair.Item1, true, pair.Item1 == "direct_crypto" ? "USD" : "XTR", new[] { pair.Item2 }, new SupportCustomAmount(true, 1, 10000));

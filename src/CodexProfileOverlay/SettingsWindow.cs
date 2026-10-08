@@ -117,6 +117,7 @@ internal sealed class SettingsWindow : Window
         SnapsToDevicePixels = true;
         WindowStartupLocation = WindowStartupLocation.Manual;
         WindowCaptionThemeService.Apply(this, settings.Theme);
+        AuxiliaryWindowChrome.Apply(this);
         ApplySavedGeometry();
 
         Content = BuildShell();
@@ -128,19 +129,6 @@ internal sealed class SettingsWindow : Window
         {
             SaveGeometry();
             if (!allowClose) { e.Cancel = true; Hide(); }
-        };
-        StateChanged += (_, _) =>
-        {
-            if (WindowState == WindowState.Minimized)
-            {
-                // Complete the native minimize notification before hiding/restoring.
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    if (WindowState != WindowState.Minimized) return;
-                    WindowState = WindowState.Normal;
-                    Hide();
-                }));
-            }
         };
         Closed += (_, _) =>
         {
@@ -232,7 +220,10 @@ internal sealed class SettingsWindow : Window
         supportButton = new Button { Width = 36, Height = 36, MinHeight = 36, MinWidth = 36, Padding = new Thickness(0), Margin = new Thickness(0, 0, 8, 0) };
         supportButton.Click += (_, _) => OpenSupport();
         headerActions.Children.Add(supportButton);
+        githubButton.Style = (Style)FindResource("HeaderActionButtonStyle");
+        supportButton.Style = (Style)FindResource("HeaderActionButtonStyle");
         themeButton = CreateThemeButton();
+        themeButton.Style = (Style)FindResource("HeaderActionButtonStyle");
         headerActions.Children.Add(themeButton);
         Grid.SetColumn(headerActions, 1);
         header.Children.Add(headerActions);
@@ -441,8 +432,8 @@ internal sealed class SettingsWindow : Window
         themeButton.ToolTip = light ? localizer["SwitchToDarkTheme"] : localizer["SwitchToLightTheme"];
         System.Windows.Automation.AutomationProperties.SetName(themeButton, (string)themeButton.ToolTip);
         themeButton.Content = CreateThemeIcon(light);
-        themeButton.Background = Brush(light ? "TabActiveBrush" : "Surface2Brush");
-        themeButton.BorderBrush = Brush(light ? "AccentBrush" : "BorderBrush");
+        themeButton.Background = Brush("Surface2Brush");
+        themeButton.BorderBrush = Brush("BorderBrush");
     }
 
     private UIElement CreateThemeIcon(bool light)

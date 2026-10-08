@@ -278,7 +278,7 @@ public partial class SupportWindow : Window
                 {
                     RenderMethods();
                     ShowOnly(MethodsPanel);
-                    (TelegramMethodButton.IsEnabled ? TelegramMethodButton : CryptoMethodButton).Focus();
+                    CloseButton.Focus();
                 }
                 else
                 {

@@ -67,6 +67,7 @@ internal sealed class ProfileManagerWindow : Window
         FontSize = 15;
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
+        AuxiliaryWindowChrome.Apply(this);
         WindowCaptionThemeService.ApplyCurrent(this);
 
         Content = BuildShell(addProfile);

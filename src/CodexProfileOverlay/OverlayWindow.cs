@@ -25,7 +25,7 @@ internal sealed class OverlayWindow : Window
     private readonly OverlayLayoutService layoutService = new();
     private readonly Border shell = new();
     private readonly Popup compactPopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom };
-    private readonly Popup usagePopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Left, PopupAnimation = PopupAnimation.None };
+    private readonly Popup usagePopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.None };
     private string? usageProfile;
     public Func<string, Task>? OnRefreshUsage { get; set; }
     private readonly List<Button> profileButtons = [];
@@ -448,7 +448,7 @@ internal sealed class OverlayWindow : Window
         var row = new DockPanel();
         var info = new Button { Content = "ⓘ", ToolTip = Localizer?["UsageDetails"], Padding = new Thickness(4, 0, 4, 0), MinWidth = 24, MinHeight = 24, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
         System.Windows.Automation.AutomationProperties.SetName(info, (Localizer?["UsageDetails"] ?? "Account limits") + " " + profile.DisplayName);
-        DockPanel.SetDock(info, Dock.Right);
+        DockPanel.SetDock(info, Dock.Left);
         info.Click += (_, e) => {
             e.Handled = true;
             usageProfile = profile.Name;

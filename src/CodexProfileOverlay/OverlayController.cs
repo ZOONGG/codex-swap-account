@@ -568,7 +568,7 @@ internal sealed class OverlayController : IDisposable
 
     private void ShowProfileManager()
     {
-        if (profileManagerWindow is { IsVisible: true })
+        if (profileManagerWindow is not null)
         {
             BringToFront(profileManagerWindow);
             return;
