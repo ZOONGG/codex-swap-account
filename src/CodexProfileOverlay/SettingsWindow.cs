@@ -255,7 +255,7 @@ internal sealed class SettingsWindow : Window
             AddNav(SettingsPage.Hotkeys, localizer["Hotkeys"]);
             AddNav(SettingsPage.Language, localizer["Language"]);
             AddNav(SettingsPage.Status, localizer["StatusAndLimits"]);
-            AddNav(SettingsPage.Advanced, localizer["Advanced"] + (updates.HasUpdate ? " вЂў" : ""));
+            AddNav(SettingsPage.Advanced, localizer["Advanced"] + (updates.HasUpdate ? " •" : ""));
 
             pageTitle.Text = PageName(page);
             pageTitle.Foreground = Brush("StrongTextBrush");
@@ -348,12 +348,12 @@ internal sealed class SettingsWindow : Window
             });
             content.Children.Add(new TextBlock
             {
-                Text = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "РџРѕРґРґРµСЂР¶Р°С‚СЊ" : "Support",
+                Text = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "Поддержать" : "Support",
                 VerticalAlignment = VerticalAlignment.Center,
             });
             supportButton.Content = content;
             supportButton.ToolTip = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian
-                ? "РџРѕРґРґРµСЂР¶Р°С‚СЊ СЂР°Р·РІРёС‚РёРµ Codex Swap Account"
+                ? "Поддержать развитие Codex Swap Account"
                 : "Support Codex Swap Account development";
         }
     }
@@ -555,10 +555,10 @@ internal sealed class SettingsWindow : Window
             Foreground = Brush("StrongTextBrush"),
             Margin = new Thickness(0, 0, 0, 10),
         });
-        legend.Children.Add(LegendRow("в­ђ", localizer["RecommendedProfile"], localizer["RecommendedProfileHelp"]));
-        legend.Children.Add(LegendRow("рџџў", localizer["HighCapacity"], localizer["HighCapacityHelp"]));
-        legend.Children.Add(LegendRow("рџџЎ", localizer["MediumCapacity"], localizer["MediumCapacityHelp"]));
-        legend.Children.Add(LegendRow("рџ”ґ", localizer["LowCapacity"], localizer["LowCapacityHelp"]));
+        legend.Children.Add(LegendRow("⭐", localizer["RecommendedProfile"], localizer["RecommendedProfileHelp"]));
+        legend.Children.Add(LegendRow("🟢", localizer["HighCapacity"], localizer["HighCapacityHelp"]));
+        legend.Children.Add(LegendRow("🟡", localizer["MediumCapacity"], localizer["MediumCapacityHelp"]));
+        legend.Children.Add(LegendRow("🔴", localizer["LowCapacity"], localizer["LowCapacityHelp"]));
 
         legend.Children.Add(new TextBlock
         {
@@ -657,8 +657,8 @@ internal sealed class SettingsWindow : Window
         var presets = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
         foreach ((string Emoji, string Key) preset in new[]
         {
-            ("рџџў", "PresetReady"), ("рџџЎ", "PresetPartlyUsed"), ("рџџ ", "PresetLow"),
-            ("рџ”ґ", "PresetExhausted"), ("вЏі", "PresetResetsSoon"), ("рџ’¤", "PresetInactive"), ("вљЄ", "PresetUnknown"),
+            ("🟢", "PresetReady"), ("🟡", "PresetPartlyUsed"), ("🟠", "PresetLow"),
+            ("🔴", "PresetExhausted"), ("⏳", "PresetResetsSoon"), ("💤", "PresetInactive"), ("⚪", "PresetUnknown"),
         })
         {
             var button = new Button { Content = EmojiLabel(preset.Emoji, localizer[preset.Key]), Margin = new Thickness(0, 0, 8, 8) };
@@ -780,7 +780,7 @@ internal sealed class SettingsWindow : Window
 
     private static FrameworkElement CreateIndicatorVisual(string indicator, double size)
     {
-        if (indicator == "в­ђ")
+        if (indicator == "⭐")
         {
             return new Viewbox
             {
@@ -800,11 +800,11 @@ internal sealed class SettingsWindow : Window
 
         Color? color = indicator switch
         {
-            "рџџў" => Color.FromRgb(34, 197, 94),
-            "рџџЎ" => Color.FromRgb(250, 204, 21),
-            "рџџ " => Color.FromRgb(249, 115, 22),
-            "рџ”ґ" => Color.FromRgb(239, 68, 68),
-            "вљЄ" => Color.FromRgb(229, 231, 235),
+            "🟢" => Color.FromRgb(34, 197, 94),
+            "🟡" => Color.FromRgb(250, 204, 21),
+            "🟠" => Color.FromRgb(249, 115, 22),
+            "🔴" => Color.FromRgb(239, 68, 68),
+            "⚪" => Color.FromRgb(229, 231, 235),
             _ => null,
         };
 
@@ -880,7 +880,7 @@ internal sealed class SettingsWindow : Window
 
         foreach (UsageLimitWindow window in UsageIntelligence.GetKnownWindows(snapshot))
         {
-            string reset = window.ResetAt is null ? string.Empty : $" В· {localizer["ResetsAt"]} {UsageDisplayFormatter.FormatLocal(window.ResetAt.Value)}";
+            string reset = window.ResetAt is null ? string.Empty : $" · {localizer["ResetsAt"]} {UsageDisplayFormatter.FormatLocal(window.ResetAt.Value)}";
             lines.Add($"{window.Name}: {window.RemainingPercent}%{reset}");
         }
         lines.Add($"{localizer["LastUpdated"]}: {UsageDisplayFormatter.FormatLocal(snapshot.CapturedAt)}");
@@ -973,11 +973,11 @@ internal sealed class SettingsWindow : Window
         });
         heading.Children.Add(new TextBlock { Text = localizer[state], TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(heading);
-        panel.Children.Add(new TextBlock { Text = "v" + updates.CurrentVersion + (updates.HasUpdate ? " в†’ " + updates.Cache.Release!.Tag : ""), Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 6, 0, 8) });
+        panel.Children.Add(new TextBlock { Text = "v" + updates.CurrentVersion + (updates.HasUpdate ? " → " + updates.Cache.Release!.Tag : ""), Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 6, 0, 8) });
         if (updates.HasUpdate && updates.Cache.Release is { } release)
         {
             panel.Children.Add(new TextBlock { Text = release.Published.ToLocalTime().ToString("d", CultureInfo.CurrentCulture), Foreground = Brush("MutedTextBrush") });
-            panel.Children.Add(new ScrollViewer { MaxHeight = 120, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 8), Content = new TextBlock { Text = release.Notes.Length > 2000 ? release.Notes[..2000] + "вЂ¦" : release.Notes, TextWrapping = TextWrapping.Wrap } });
+            panel.Children.Add(new ScrollViewer { MaxHeight = 120, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 8), Content = new TextBlock { Text = release.Notes.Length > 2000 ? release.Notes[..2000] + "…" : release.Notes, TextWrapping = TextWrapping.Wrap } });
         }
         var actions = new WrapPanel();
         Button ActionButton(string key, RoutedEventHandler action)
@@ -1112,7 +1112,7 @@ internal sealed class SettingsWindow : Window
     }
 
     private static string FormatTimestamp(DateTimeOffset? timestamp)
-        => timestamp?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "вЂ”";
+        => timestamp?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "—";
 
     private UIElement SettingCheck(string title, string subtitle, bool value, Action<bool> setter, bool enabled = true)
     {
