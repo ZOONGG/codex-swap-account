@@ -70,7 +70,6 @@ public sealed class SettingsServiceTests
         Assert.NotNull(loaded.Hotkeys);
         Assert.NotNull(loaded.Hotkeys.ProfileHotkeys);
         Assert.False(loaded.ShowAutomaticLimitIndicators);
-        Assert.False(loaded.ShowManualProfileEmojiInOverlay);
         Assert.Equal(90, loaded.StaleDataThresholdMinutes);
     }
 

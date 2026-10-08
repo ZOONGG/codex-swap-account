@@ -94,11 +94,49 @@
             </Setter>
         </Style>
 
+        <Style x:Key="ScrollPageButton" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></Setter.Value></Setter>
+        </Style>
         <Style TargetType="{x:Type ScrollBar}">
-            <Setter Property="Background" Value="{DynamicResource Surface1Brush}" />
-            <Setter Property="Foreground" Value="{DynamicResource BorderBrush}" />
-            <Setter Property="Width" Value="10" />
-            <Setter Property="Height" Value="10" />
+            <Setter Property="Background" Value="{DynamicResource Surface1Brush}"/>
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="Height" Value="Auto"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Border Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                            <Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}" IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton><RepeatButton x:Name="Decrease" Command="ScrollBar.PageUpCommand" Style="{StaticResource ScrollPageButton}"/></Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb x:Name="ScrollThumb" MinHeight="24" MinWidth="6">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="ThumbSurface" Margin="2" CornerRadius="3" Background="{DynamicResource BorderBrush}"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ThumbSurface" Property="Background" Value="{DynamicResource MutedTextBrush}"/></Trigger>
+                                                    <Trigger Property="IsDragging" Value="True"><Setter TargetName="ThumbSurface" Property="Background" Value="{DynamicResource AccentBrush}"/></Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton><RepeatButton x:Name="Increase" Command="ScrollBar.PageDownCommand" Style="{StaticResource ScrollPageButton}"/></Track.IncreaseRepeatButton>
+                            </Track>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Orientation" Value="Horizontal">
+                                <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+                                <Setter TargetName="ScrollThumb" Property="MinHeight" Value="6"/>
+                                <Setter TargetName="ScrollThumb" Property="MinWidth" Value="24"/>
+                                <Setter TargetName="Decrease" Property="Command" Value="ScrollBar.PageLeftCommand"/>
+                                <Setter TargetName="Increase" Property="Command" Value="ScrollBar.PageRightCommand"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers><Trigger Property="Orientation" Value="Horizontal"><Setter Property="Width" Value="Auto"/><Setter Property="Height" Value="10"/></Trigger></Style.Triggers>
         </Style>
 
         <Style TargetType="{x:Type Button}">

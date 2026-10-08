@@ -39,6 +39,57 @@ public sealed class ProfileLoginServiceTests
         Assert.Empty(Directory.GetDirectories(Path.Combine(layout.Paths.ApplicationDataDirectory, "login-staging")));
     }
 
+    [Fact]
+    public async Task CreationSupportsRelocatedRootsButRejectsProfileJunctions()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var layout = new TestLayout();
+        string profiles = layout.Paths.ProfilesDirectory;
+        string shared = layout.Paths.SharedCodexDirectory;
+        string profilesTarget = profiles + "-relocated";
+        string sharedTarget = shared + "-relocated";
+        Directory.Move(profiles, profilesTarget);
+        Directory.Move(shared, sharedTarget);
+        CreateJunction(profiles, profilesTarget);
+        CreateJunction(shared, sharedTarget);
+        try
+        {
+            var manager = Manager(layout);
+            var service = new ProfileLoginService(layout.Paths, manager, Success());
+            Assert.True(await service.LoginAsync("new", false, null, default));
+            Assert.Equal("new", Assert.Single(Manager(layout).ListProfiles()).Name);
+            Assert.Equal("fake-new-credential", layout.ReadProfileAuth("new"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.LoginAsync("NEW", false, null, default));
+            string linked = Path.Combine(profiles, "linked");
+            CreateJunction(linked, Path.Combine(profilesTarget, "new"));
+            try
+            {
+                await Assert.ThrowsAsync<IOException>(() => service.LoginAsync("linked", true, null, default));
+                Assert.Equal("fake-new-credential", layout.ReadProfileAuth("new"));
+            }
+            finally { Directory.Delete(linked); }
+        }
+        finally { Directory.Delete(profiles); Directory.Delete(shared); }
+    }
+
+    private static void CreateJunction(string link, string target)
+    {
+        var info = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        info.ArgumentList.Add("-NoProfile");
+        info.ArgumentList.Add("-NonInteractive");
+        info.ArgumentList.Add("-Command");
+        info.ArgumentList.Add("$ErrorActionPreference = 'Stop'; New-Item -ItemType Junction -Path $env:OVERLAY_TEST_LINK -Target $env:OVERLAY_TEST_TARGET | Out-Null");
+        info.Environment["OVERLAY_TEST_LINK"] = link;
+        info.Environment["OVERLAY_TEST_TARGET"] = target;
+        using var process = System.Diagnostics.Process.Start(info)!;
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+    }
+
     [Theory]
     [InlineData(false, "failed")]
     [InlineData(false, "cancelled")]

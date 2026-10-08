@@ -6,6 +6,24 @@ namespace CodexProfileOverlay.Tests;
 public sealed class ProfileStatusStoreTests
 {
     [Fact]
+    public void LegacyManualFieldsAreIgnoredWithoutLosingAutomaticUsage()
+    {
+        using var temp = new TempDirectory();
+        string file = Path.Combine(temp.Path, "status.json");
+        File.WriteAllText(file, """
+            {"schemaVersion":3,"profiles":[{"profileId":"work","manualEmoji":"old","manualResetAt":"2026-10-08T00:00:00Z","automaticRefreshEnabled":false}],
+            "snapshots":{"work":{"windows":[{"name":"5h","remainingPercent":75}]}}}
+            """);
+        var store = new ProfileStatusStore(file);
+        var document = store.Load();
+        Assert.False(document.Profiles.Single().AutomaticRefreshEnabled);
+        Assert.Equal(75, document.Snapshots["work"].Windows.Single().RemainingPercent);
+        store.Save(document);
+        Assert.DoesNotContain("manual", File.ReadAllText(file), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(75, store.Load().Snapshots["work"].Windows.Single().RemainingPercent);
+    }
+
+    [Fact]
     public void SaveAndLoad_RoundTripsStatusDocument()
     {
         using var temp = new TempDirectory();
@@ -16,8 +34,8 @@ public sealed class ProfileStatusStoreTests
         {
             Profiles =
             {
-                new ProfileStatusMetadata { ProfileId = "work", ManualLabel = "Ready", ManualNote = "Test note" },
-                new ProfileStatusMetadata { ProfileId = "personal", ManualEmoji = "🟡" },
+                new ProfileStatusMetadata { ProfileId = "work", AutomaticRefreshEnabled = false },
+                new ProfileStatusMetadata { ProfileId = "personal", AutomaticRefreshEnabled = true },
             },
             Snapshots =
             {
@@ -38,8 +56,7 @@ public sealed class ProfileStatusStoreTests
 
         Assert.Equal(2, loaded.Profiles.Count);
         Assert.Equal("work", loaded.Profiles[0].ProfileId);
-        Assert.Equal("Ready", loaded.Profiles[0].ManualLabel);
-        Assert.Equal("Test note", loaded.Profiles[0].ManualNote);
+        Assert.False(loaded.Profiles[0].AutomaticRefreshEnabled);
         Assert.Single(loaded.Snapshots);
         Assert.Equal(3, loaded.SchemaVersion);
         Assert.Equal(75, loaded.Snapshots["work"].Windows[0].RemainingPercent);
@@ -104,13 +121,13 @@ public sealed class ProfileStatusStoreTests
         var store = new ProfileStatusStore(Path.Combine(temp.Path, "status.json"));
         var document = new ProfileStatusDocument
         {
-            Profiles = { new ProfileStatusMetadata { ProfileId = "existing", ManualLabel = "Ready" } },
+            Profiles = { new ProfileStatusMetadata { ProfileId = "existing", AutomaticRefreshEnabled = false } },
         };
 
         var status = store.GetOrCreateStatus(document, "existing");
 
         Assert.Equal("existing", status.ProfileId);
-        Assert.Equal("Ready", status.ManualLabel);
+        Assert.False(status.AutomaticRefreshEnabled);
         Assert.Single(document.Profiles); // No duplicate created
     }
 }

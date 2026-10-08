@@ -99,7 +99,6 @@ public sealed class ProfileStatusStore
             }
 
             status.ProfileId = status.ProfileId.Trim();
-            status.ManualResetAt = status.ManualResetAt?.ToUniversalTime();
             status.LastAutomaticSnapshot = status.LastAutomaticSnapshot?.ToUniversalTime();
             status.LastRefreshAttemptAt = status.LastRefreshAttemptAt?.ToUniversalTime();
         }

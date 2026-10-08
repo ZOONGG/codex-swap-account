@@ -56,7 +56,6 @@ public sealed class OverlaySettings
 
     public bool ShowIndicatorsInOverlay { get; set; } = true;
 
-    public bool ShowManualProfileEmojiInOverlay { get; set; }
 
     public bool WarnWhenNearlyExhausted { get; set; } = true;
 

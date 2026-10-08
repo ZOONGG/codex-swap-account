@@ -37,7 +37,8 @@ public sealed class LocalizationCatalogTests
             Assert.NotEqual("IndicatorLegend", LocalizationCatalog.Text(language, "IndicatorLegend"));
             Assert.NotEqual("RecommendedProfile", LocalizationCatalog.Text(language, "RecommendedProfile"));
             Assert.NotEqual("AutomaticLimitsUnavailable", LocalizationCatalog.Text(language, "AutomaticLimitsUnavailable"));
-            Assert.NotEqual("ClearManualStatus", LocalizationCatalog.Text(language, "ClearManualStatus"));
+            Assert.NotEqual("InvalidProfileName", LocalizationCatalog.Text(language, "InvalidProfileName"));
+            Assert.NotEqual("DuplicateProfileName", LocalizationCatalog.Text(language, "DuplicateProfileName"));
         }
     }
 

@@ -15,6 +15,10 @@ public static class ProfileName
             return false;
         }
 
+        string stem = trimmed.Split('.')[0].TrimEnd(' ');
+        if (trimmed.Length > 255 || trimmed.EndsWith('.') ||
+            System.Text.RegularExpressions.Regex.IsMatch(stem, @"\A(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])\z", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return false;
+
         return trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
             && !trimmed.Contains(Path.DirectorySeparatorChar, StringComparison.Ordinal)
             && !trimmed.Contains(Path.AltDirectorySeparatorChar, StringComparison.Ordinal);

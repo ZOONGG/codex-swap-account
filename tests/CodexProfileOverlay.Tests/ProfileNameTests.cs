@@ -23,6 +23,11 @@ public sealed class ProfileNameTests
     [InlineData("..")]
     [InlineData(" trailing")]
     [InlineData("trailing ")]
+    [InlineData("CON")]
+    [InlineData("nul.txt")]
+    [InlineData("COM1")]
+    [InlineData("LPT9.log")]
+    [InlineData("trailing.")]
     public void IsValid_RejectsUnsafeNames(string value)
     {
         Assert.False(ProfileName.IsValid(value));

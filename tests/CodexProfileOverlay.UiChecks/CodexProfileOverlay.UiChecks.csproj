@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><Platforms>x64</Platforms>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/CodexProfileOverlay/CodexProfileOverlay.csproj"/></ItemGroup>
+  <ItemGroup><Resource Include="../../src/CodexProfileOverlay/Assets/AppIcon.ico" Link="Assets/AppIcon.ico"/></ItemGroup>
+  <ItemGroup><Content Include="../../src/CodexProfileOverlay/App.xaml" Link="AppResources.xaml" CopyToOutputDirectory="PreserveNewest"/></ItemGroup>
+</Project>

@@ -4,8 +4,6 @@ namespace CodexProfileOverlay.Core.Services;
 
 public sealed class ProfileStatusService : IDisposable
 {
-    public const int MaximumLabelLength = 24;
-    public const int MaximumNoteLength = 120;
 
     private readonly ProfileStatusStore store;
     private readonly IUsageProvider usageProvider;
@@ -38,36 +36,6 @@ public sealed class ProfileStatusService : IDisposable
 
     public UsageSnapshot? GetCachedSnapshot(ProfileStatusDocument document, string profileId)
         => document.Snapshots.TryGetValue(profileId, out UsageSnapshot? snapshot) ? snapshot : null;
-
-    public void SaveManualStatus(
-        string profileId,
-        string? emoji,
-        string? label,
-        string? note,
-        DateTimeOffset? resetAt,
-        string? color)
-    {
-        ProfileStatusDocument document = Load();
-        ProfileStatusMetadata status = GetOrCreateStatus(document, profileId);
-        status.ManualEmoji = Optional(emoji, 8, nameof(emoji));
-        status.ManualLabel = Optional(label, MaximumLabelLength, nameof(label));
-        status.ManualNote = Optional(note, MaximumNoteLength, nameof(note));
-        status.ManualResetAt = resetAt?.ToUniversalTime();
-        status.ManualColor = Optional(color, 32, nameof(color));
-        Save(document);
-    }
-
-    public void ClearManualStatus(string profileId)
-    {
-        ProfileStatusDocument document = Load();
-        ProfileStatusMetadata status = GetOrCreateStatus(document, profileId);
-        status.ManualEmoji = null;
-        status.ManualLabel = null;
-        status.ManualNote = null;
-        status.ManualResetAt = null;
-        status.ManualColor = null;
-        Save(document);
-    }
 
     public void ClearCachedUsage(string profileId)
     {
@@ -244,17 +212,6 @@ public sealed class ProfileStatusService : IDisposable
 
         disposed = true;
         refreshGate.Dispose();
-    }
-
-    private static string? Optional(string? value, int maximumLength, string parameterName)
-    {
-        string? trimmed = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (trimmed?.Length > maximumLength)
-        {
-            throw new ArgumentOutOfRangeException(parameterName, $"Value cannot exceed {maximumLength} characters.");
-        }
-
-        return trimmed;
     }
 
     private static void MarkFailure(

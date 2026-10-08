@@ -151,8 +151,8 @@ public sealed class ProfileLoginService
 
     private void RejectLinks(string destination)
     {
-        foreach (string path in new[] { paths.ProfilesDirectory, destination, Path.Combine(destination, "auth.json"),
-            paths.SharedCodexDirectory, paths.SharedAuthFile })
+        // Configured roots may be relocated with junctions. Profile/auth links remain forbidden.
+        foreach (string path in new[] { destination, Path.Combine(destination, "auth.json"), paths.SharedAuthFile })
         {
             if ((File.Exists(path) || Directory.Exists(path)) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("Authorization paths must not be symbolic links or junctions.");

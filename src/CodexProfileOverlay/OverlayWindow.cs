@@ -25,7 +25,7 @@ internal sealed class OverlayWindow : Window
     private readonly OverlayLayoutService layoutService = new();
     private readonly Border shell = new();
     private readonly Popup compactPopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom };
-    private readonly Popup usagePopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.None };
+    private readonly Popup usagePopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Left, PopupAnimation = PopupAnimation.None };
     private string? usageProfile;
     public Func<string, Task>? OnRefreshUsage { get; set; }
     private readonly List<Button> profileButtons = [];
@@ -64,7 +64,14 @@ internal sealed class OverlayWindow : Window
         SnapsToDevicePixels = true;
         ApplyScale();
 
-        usagePopup.Closed += (_, _) => { indicatorSignature = BuildIndicatorSignature(); RebuildContent(); };
+        usagePopup.Opened += (_, _) => compactPopup.StaysOpen = true;
+        usagePopup.Closed += (_, _) =>
+        {
+            compactPopup.StaysOpen = false;
+            compactPopup.IsOpen = false;
+            indicatorSignature = BuildIndicatorSignature();
+            RebuildContent();
+        };
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape) return;
@@ -445,12 +452,7 @@ internal sealed class OverlayWindow : Window
         info.Click += (_, e) => {
             e.Handled = true;
             usageProfile = profile.Name;
-            if (compactPopup.IsOpen)
-            {
-                compactPopup.IsOpen = false;
-                usagePopup.PlacementTarget = shell;
-            }
-            else usagePopup.PlacementTarget = info;
+            usagePopup.PlacementTarget = account;
             usagePopup.Child = BuildUsagePanel(profile.Name);
             usagePopup.IsOpen = true;
         };
@@ -575,15 +577,7 @@ internal sealed class OverlayWindow : Window
             }
         }
 
-        if (!settings.ShowManualProfileEmojiInOverlay)
-        {
-            return string.Empty;
-        }
-
-        string? manual = statusDocument.Profiles
-            .FirstOrDefault(status => profileId.Equals(status.ProfileId, StringComparison.OrdinalIgnoreCase))
-            ?.ManualEmoji;
-        return FirstTextElement(manual);
+        return string.Empty;
     }
 
     private FrameworkElement CreateIndicator(string profileId, string indicator, Thickness margin)
@@ -640,17 +634,6 @@ internal sealed class OverlayWindow : Window
 
     private string BuildIndicatorSignature()
         => string.Join('|', profiles.Select(profile => profile.Name + ":" + GetProfileIndicator(profile.Name)));
-
-    private static string FirstTextElement(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        TextElementEnumerator enumerator = StringInfo.GetTextElementEnumerator(value.Trim());
-        return enumerator.MoveNext() ? enumerator.GetTextElement() : string.Empty;
-    }
 
     private static bool NearlyEqual(Rect left, Rect right)
         => NearlyEqual(left.Left, right.Left)

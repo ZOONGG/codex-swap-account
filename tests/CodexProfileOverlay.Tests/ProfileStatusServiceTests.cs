@@ -103,18 +103,17 @@ public sealed class ProfileStatusServiceTests
     }
 
     [Fact]
-    public async Task Refresh_PreservesManualStatusAndReplacesSnapshot()
+    public async Task Refresh_PreservesRefreshPreferenceAndReplacesSnapshot()
     {
         UsageSnapshot returned = Snapshot(("5h", 72, null));
         using TestService fixture = new(new DelegateProvider((_, _) => Task.FromResult<UsageSnapshot?>(returned)));
         ProfileStatusDocument document = Document(("work", Snapshot(("5h", 20, null))));
-        document.Profiles.Add(new ProfileStatusMetadata { ProfileId = "work", ManualEmoji = "🟢", ManualNote = "manual" });
+        document.Profiles.Add(new ProfileStatusMetadata { ProfileId = "work", AutomaticRefreshEnabled = false });
 
         await fixture.Service.RefreshUsageAsync("work", @"C:\fake-profile", document, CancellationToken.None);
 
         Assert.Equal(72, UsageIntelligence.EffectiveRemainingPercent(document.Snapshots["work"]));
-        Assert.Equal("manual", document.Profiles.Single().ManualNote);
-        Assert.Equal("🟢", document.Profiles.Single().ManualEmoji);
+        Assert.False(document.Profiles.Single().AutomaticRefreshEnabled);
     }
 
     [Fact]
@@ -181,20 +180,6 @@ public sealed class ProfileStatusServiceTests
 
         Assert.Empty(document.Snapshots);
         Assert.Equal("Automatic limits unavailable", document.Profiles.Single().LastRefreshError);
-    }
-
-    [Fact]
-    public void ManualStatus_ValidatesLengthsAndStoresUtc()
-    {
-        using TestService fixture = new();
-        DateTimeOffset local = new(2026, 7, 5, 12, 0, 0, TimeSpan.FromHours(6));
-
-        fixture.Service.SaveManualStatus("work", "🟢", new string('a', 24), new string('b', 120), local, "#00ff00");
-        ProfileStatusMetadata saved = fixture.Service.Load().Profiles.Single();
-
-        Assert.Equal(TimeSpan.Zero, saved.ManualResetAt!.Value.Offset);
-        Assert.Throws<ArgumentOutOfRangeException>(() => fixture.Service.SaveManualStatus("work", null, new string('a', 25), null, null, null));
-        Assert.Throws<ArgumentOutOfRangeException>(() => fixture.Service.SaveManualStatus("work", null, null, new string('b', 121), null, null));
     }
 
     [Fact]

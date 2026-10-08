@@ -114,7 +114,7 @@ internal sealed class OverlayController : IDisposable
         updates.Dispose();
         hotkeyManager?.Dispose();
         trayIcon?.Dispose();
-        settingsWindow?.Close();
+        settingsWindow?.CloseForShutdown();
         profileManagerWindow?.Close();
         overlayWindow?.Close();
         disposalTokenSource.Dispose();
@@ -416,7 +416,15 @@ internal sealed class OverlayController : IDisposable
         EnsureOverlay();
         string? name = ShowPrompt(PromptOwner(), localizer["AddProfileTitle"], localizer["ProfileDirectoryName"],
             primaryText: localizer["BrowserLogin"]);
-        if (!string.IsNullOrWhiteSpace(name)) await LoginAccountAsync(name, false);
+        if (name is null) return;
+        string? error = !ProfileName.IsValid(name) ? "InvalidProfileName"
+            : Directory.Exists(Path.Combine(paths.ProfilesDirectory, name)) || File.Exists(Path.Combine(paths.ProfilesDirectory, name)) ? "DuplicateProfileName" : null;
+        if (error is not null)
+        {
+            System.Windows.MessageBox.Show(PromptOwner(), localizer[error], localizer["AddProfileTitle"], MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        await LoginAccountAsync(name, false);
     }
 
     private async Task LoginAccountAsync(string name, bool reauthorize)
@@ -526,7 +534,7 @@ internal sealed class OverlayController : IDisposable
 
     private void ShowSettingsWindow()
     {
-        if (settingsWindow is { IsVisible: true })
+        if (settingsWindow is not null)
         {
             BringToFront(settingsWindow);
             return;

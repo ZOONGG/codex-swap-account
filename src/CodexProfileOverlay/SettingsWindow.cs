@@ -124,7 +124,24 @@ internal sealed class SettingsWindow : Window
         localizer.LanguageChanged += Rebuild;
         PreviewMouseDown += OnPreviewMouseDownCommitNumber;
         Rebuild();
-        Closing += (_, _) => SaveGeometry();
+        Closing += (_, e) =>
+        {
+            SaveGeometry();
+            if (!allowClose) { e.Cancel = true; Hide(); }
+        };
+        StateChanged += (_, _) =>
+        {
+            if (WindowState == WindowState.Minimized)
+            {
+                // Complete the native minimize notification before hiding/restoring.
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (WindowState != WindowState.Minimized) return;
+                    WindowState = WindowState.Normal;
+                    Hide();
+                }));
+            }
+        };
         Closed += (_, _) =>
         {
             appliedTimer.Stop();
@@ -136,6 +153,9 @@ internal sealed class SettingsWindow : Window
             PreviewMouseDown -= OnPreviewMouseDownCommitNumber;
         };
     }
+
+    private bool allowClose;
+    public void CloseForShutdown() { allowClose = true; Close(); }
 
     public void UpdateProfiles(IReadOnlyList<ProfileInfo> newProfiles)
     {
@@ -570,7 +590,6 @@ internal sealed class SettingsWindow : Window
                 providerSupported),
             EnumCombo(localizer["TrayUsage"], localizer["TrayUsageHelp"], settings.TrayUsageMode, value => settings.TrayUsageMode = value),
             SettingCheck(localizer["ShowIndicatorsInOverlay"], localizer["ShowIndicatorsInOverlayHelp"], settings.ShowIndicatorsInOverlay, value => settings.ShowIndicatorsInOverlay = value),
-            SettingCheck(localizer["ShowManualEmoji"], localizer["ShowManualEmojiHelp"], settings.ShowManualProfileEmojiInOverlay, value => settings.ShowManualProfileEmojiInOverlay = value),
             NumberInput(localizer["GreenThreshold"], localizer["GreenThresholdHelp"], settings.GreenThresholdPercent, value => settings.GreenThresholdPercent = (int)value, 1, 26, 100),
             NumberInput(localizer["YellowThreshold"], localizer["YellowThresholdHelp"], settings.YellowThresholdPercent, value => settings.YellowThresholdPercent = (int)value, 1, 1, 99),
             NumberInput(localizer["StaleDataThreshold"], localizer["StaleDataThresholdHelp"], settings.StaleDataThresholdMinutes, value => settings.StaleDataThresholdMinutes = (int)value, 1, 10, 1440),
@@ -581,7 +600,7 @@ internal sealed class SettingsWindow : Window
         };
 
         stack.Children.Add(Card(rows.ToArray()));
-        stack.Children.Add(BuildManualStatusEditor(providerSupported));
+        stack.Children.Add(BuildProfileRefreshEditor(providerSupported));
         var usageDocument = statusService.Load();
         var recommended = statusService.FindRecommendedProfile(profiles.Select(p => p.Name).ToArray(), usageDocument);
         foreach (var profile in profiles)
@@ -660,7 +679,7 @@ internal sealed class SettingsWindow : Window
         return row;
     }
 
-    private UIElement BuildManualStatusEditor(bool providerSupported)
+    private UIElement BuildProfileRefreshEditor(bool providerSupported)
     {
         if (profiles.Count == 0)
         {
@@ -675,7 +694,7 @@ internal sealed class SettingsWindow : Window
         var panel = new StackPanel();
         panel.Children.Add(new TextBlock
         {
-            Text = localizer["ManualProfileStatus"],
+            Text = localizer["UsageDetails"],
             FontSize = 16,
             FontWeight = FontWeights.SemiBold,
             Foreground = Brush("StrongTextBrush"),
@@ -701,47 +720,6 @@ internal sealed class SettingsWindow : Window
         };
         panel.Children.Add(selector);
 
-        var presets = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
-        foreach ((string Emoji, string Key) preset in new[]
-        {
-            ("🟢", "PresetReady"), ("🟡", "PresetPartlyUsed"), ("🟠", "PresetLow"),
-            ("🔴", "PresetExhausted"), ("⏳", "PresetResetsSoon"), ("💤", "PresetInactive"), ("⚪", "PresetUnknown"),
-        })
-        {
-            var button = new Button { Content = EmojiLabel(preset.Emoji, localizer[preset.Key]), Margin = new Thickness(0, 0, 8, 8) };
-            button.Click += (_, _) =>
-            {
-                SaveManual(selected.Name, preset.Emoji, localizer[preset.Key], metadata.ManualNote, metadata.ManualResetAt, metadata.ManualColor);
-                Rebuild();
-            };
-            presets.Children.Add(button);
-        }
-        panel.Children.Add(presets);
-
-        var emoji = TextSetting(localizer["ManualEmoji"], metadata.ManualEmoji, 8, value =>
-            SaveManual(selected.Name, value, metadata.ManualLabel, metadata.ManualNote, metadata.ManualResetAt, metadata.ManualColor));
-        var label = TextSetting(localizer["ManualLabel"], metadata.ManualLabel, ProfileStatusService.MaximumLabelLength, value =>
-            SaveManual(selected.Name, metadata.ManualEmoji, value, metadata.ManualNote, metadata.ManualResetAt, metadata.ManualColor));
-        var note = TextSetting(localizer["ManualNote"], metadata.ManualNote, ProfileStatusService.MaximumNoteLength, value =>
-            SaveManual(selected.Name, metadata.ManualEmoji, metadata.ManualLabel, value, metadata.ManualResetAt, metadata.ManualColor));
-        var reset = TextSetting(localizer["ManualResetAt"], metadata.ManualResetAt is null ? null : UsageDisplayFormatter.FormatLocal(metadata.ManualResetAt.Value), 40, value =>
-        {
-            DateTimeOffset? parsed = null;
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                if (!DateTimeOffset.TryParse(value, CultureInfo.CurrentCulture, DateTimeStyles.AssumeLocal, out DateTimeOffset date))
-                {
-                    throw new FormatException(localizer["InvalidDateTime"]);
-                }
-
-                parsed = date;
-            }
-            SaveManual(selected.Name, metadata.ManualEmoji, metadata.ManualLabel, metadata.ManualNote, parsed, metadata.ManualColor);
-        });
-        panel.Children.Add(SettingRow(localizer["ManualEmoji"], localizer["ManualEmojiHelp"], emoji));
-        panel.Children.Add(SettingRow(localizer["ManualLabel"], localizer["ManualLabelHelp"], label));
-        panel.Children.Add(SettingRow(localizer["ManualNote"], localizer["ManualNoteHelp"], note));
-        panel.Children.Add(SettingRow(localizer["ManualResetAt"], localizer["ManualResetAtHelp"], reset));
         panel.Children.Add(SettingCheck(
             localizer["CheckThisProfileAutomatically"],
             localizer["CheckThisProfileAutomaticallyHelp"],
@@ -778,29 +756,12 @@ internal sealed class SettingsWindow : Window
             }
         };
         actions.Children.Add(testProvider);
-        var clearManual = new Button { Content = localizer["ClearManualStatus"], Margin = new Thickness(0, 0, 8, 0) };
-        clearManual.Click += (_, _) => { statusService.ClearManualStatus(selected.Name); statusChanged(); Rebuild(); };
-        actions.Children.Add(clearManual);
         var clearCached = new Button { Content = localizer["ClearCachedUsage"] };
         clearCached.Click += (_, _) => { statusService.ClearCachedUsage(selected.Name); statusChanged(); Rebuild(); };
         actions.Children.Add(clearCached);
         panel.Children.Add(actions);
 
         return Card(panel);
-    }
-
-    private static UIElement EmojiLabel(string emoji, string label)
-    {
-        var panel = new StackPanel { Orientation = Orientation.Horizontal };
-        FrameworkElement icon = CreateIndicatorVisual(emoji, 15);
-        icon.Margin = new Thickness(0, 0, 6, 0);
-        panel.Children.Add(icon);
-        panel.Children.Add(new TextBlock
-        {
-            Text = label,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        return panel;
     }
 
     private static FrameworkElement CreateIndicatorVisual(string indicator, double size)
@@ -854,41 +815,6 @@ internal sealed class SettingsWindow : Window
             FontSize = size,
             VerticalAlignment = VerticalAlignment.Center,
         };
-    }
-
-    private TextBox TextSetting(string name, string? value, int maximumLength, Action<string?> commit)
-    {
-        var box = new TextBox { Text = value ?? string.Empty, MaxLength = maximumLength, MinWidth = 260 };
-        void SaveValue()
-        {
-            try
-            {
-                commit(box.Text);
-                statusText.Foreground = Brush("SuccessBrush");
-                ShowApplied();
-            }
-            catch (Exception exception) when (exception is ArgumentException or FormatException)
-            {
-                statusText.Foreground = Brush("ErrorBrush");
-                statusText.Text = exception.Message;
-            }
-        }
-        box.LostFocus += (_, _) => SaveValue();
-        box.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Enter)
-            {
-                SaveValue();
-                Keyboard.ClearFocus();
-            }
-        };
-        return box;
-    }
-
-    private void SaveManual(string profileId, string? emoji, string? label, string? note, DateTimeOffset? resetAt, string? color)
-    {
-        statusService.SaveManualStatus(profileId, emoji, label, note, resetAt, color);
-        statusChanged();
     }
 
     private string BuildUsageDetails(string profileId, ProfileStatusDocument document, bool providerSupported)
