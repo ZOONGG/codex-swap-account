@@ -156,9 +156,20 @@ internal static class Program
         window.Left = 400; window.Top = 200;
         window.Show();
         foreach (bool compact in new[] { false, true })
+        foreach (bool active in new[] { false, true })
         {
-            var account = new Button { Content = "G Grille", Width = 120, Height = 32 };
-            var row = (DockPanel)Invoke(window, "ProfileWithDetails", profile, account)!;
+            var account = compact
+                ? (Button)Invoke(window, "CreateProfilePopupButton", profile, "", active)!
+                : (Button)Invoke(window, "CreateProfileButton", profile, active)!;
+            if (compact) account.Width = 266;
+            account.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double originalWidth = account.DesiredSize.Width;
+            var row = (Button)Invoke(window, "ProfileWithDetails", profile, account)!;
+            Check(ReferenceEquals(row, account), "Info must be embedded in the original profile card");
+            var content = (Grid)account.Content;
+            var info = (Button)content.Children[0];
+            int accountClicks = 0;
+            account.Click += (_, _) => accountClicks++;
             var shell = (Border)Field(window, "shell");
             var compactPopup = (Popup)Field(window, "compactPopup");
             if (compact)
@@ -170,9 +181,13 @@ internal static class Program
             }
             else shell.Child = row;
             row.UpdateLayout();
-            Check(DockPanel.GetDock(row.Children[0]) == Dock.Left, "Info must precede its account");
-            Check(row.Children[1] == account, "Info must belong to the adjacent profile");
-            ((Button)row.Children[0]).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(Math.Abs(account.ActualWidth + account.Margin.Left + account.Margin.Right - originalWidth) < 1, "Embedding info must preserve profile width");
+            Point infoPosition = info.TranslatePoint(new Point(), account);
+            Point bodyPosition = ((UIElement)content.Children[1]).TranslatePoint(new Point(), account);
+            Check(infoPosition.X >= 0 && infoPosition.X + info.ActualWidth <= account.ActualWidth && infoPosition.Y >= 0 && infoPosition.Y + info.ActualHeight <= account.ActualHeight, "Info must be inside the profile bounds");
+            Check(infoPosition.X + info.ActualWidth <= bodyPosition.X, "Info must precede the profile avatar/content");
+            info.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(accountClicks == 0, "Info must never trigger account click");
             window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             var popup = (Popup)Field(window, "usagePopup");
             Check(popup.Placement == PlacementMode.Bottom, "Usage popup must retain original bottom placement");
@@ -183,6 +198,8 @@ internal static class Program
             var position = panel.PointToScreen(new Point());
             Check(position.X >= 0 && position.Y >= 0 && position.X + panel.ActualWidth <= SystemParameters.PrimaryScreenWidth + 1 && position.Y + panel.ActualHeight <= SystemParameters.PrimaryScreenHeight + 1, "Usage popup must fit screen");
             popup.IsOpen = false;
+            account.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(accountClicks == 1, "Remaining card must stay clickable");
         }
         window.Close();
     }

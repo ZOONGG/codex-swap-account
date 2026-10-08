@@ -422,10 +422,12 @@ internal sealed class OverlayWindow : Window
             {
                 item.ToolTip = BuildUsageToolTip(profile.Name);
             }
-            item.IsEnabled = !isActive && !isSwitching;
+            item.IsEnabled = !isSwitching;
+            if (isActive) item.Cursor = Cursors.Arrow;
             string name = profile.Name;
             item.Click += (_, _) =>
             {
+                if (isActive || isSwitching) return;
                 compactPopup.IsOpen = false;
                 usagePopup.IsOpen = false;
                 OnSwitchProfile?.Invoke(name);
@@ -445,10 +447,24 @@ internal sealed class OverlayWindow : Window
 
     private UIElement ProfileWithDetails(ProfileInfo profile, Button account)
     {
-        var row = new DockPanel();
-        var info = new Button { Content = "ⓘ", ToolTip = Localizer?["UsageDetails"], Padding = new Thickness(4, 0, 4, 0), MinWidth = 24, MinHeight = 24, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
+        // Keep the existing card dimensions; both hit targets share its chrome.
+        account.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        if (double.IsNaN(account.Width) && double.IsFinite(account.MaxWidth))
+            account.Width = Math.Max(account.MinWidth, account.DesiredSize.Width - account.Margin.Left - account.Margin.Right);
+        var original = (UIElement)account.Content;
+        account.Content = null;
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var info = new Button
+        {
+            Content = "ⓘ", ToolTip = Localizer?["UsageDetails"],
+            Width = 18, Height = 24, MinWidth = 0, MinHeight = 0,
+            Padding = new Thickness(0), Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+            Style = (Style)FindResource("HeaderActionButtonStyle"),
+        };
         System.Windows.Automation.AutomationProperties.SetName(info, (Localizer?["UsageDetails"] ?? "Account limits") + " " + profile.DisplayName);
-        DockPanel.SetDock(info, Dock.Left);
         info.Click += (_, e) => {
             e.Handled = true;
             usageProfile = profile.Name;
@@ -457,8 +473,12 @@ internal sealed class OverlayWindow : Window
             usagePopup.IsOpen = true;
         };
         row.Children.Add(info);
-        row.Children.Add(account);
-        return row;
+        Grid.SetColumn(original, 1);
+        row.Children.Add(original);
+        account.Content = row;
+        account.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        account.Padding = new Thickness(4, account.Padding.Top, 4, account.Padding.Bottom);
+        return account;
     }
 
     private UIElement BuildUsagePanel(string profileId)
@@ -484,9 +504,12 @@ internal sealed class OverlayWindow : Window
         avatar.BorderThickness = isActive ? new Thickness(1) : new Thickness(0);
         avatar.BorderBrush = isActive ? FindBrush("StrongTextBrush") : Brushes.Transparent;
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var row = new Grid { VerticalAlignment = VerticalAlignment.Center };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.Children.Add(avatar);
-        row.Children.Add(new TextBlock
+        var label = new TextBlock
         {
             Text = profile.DisplayName,
             FontSize = 13.5,
@@ -496,12 +519,16 @@ internal sealed class OverlayWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 0, 0),
             MaxWidth = 112,
-        });
+        };
+        Grid.SetColumn(label, 1);
+        row.Children.Add(label);
 
         string indicator = GetProfileIndicator(profile.Name);
         if (!string.IsNullOrEmpty(indicator))
         {
-            row.Children.Add(CreateIndicator(profile.Name, indicator, new Thickness(4, 0, 0, 0)));
+            var status = CreateIndicator(profile.Name, indicator, new Thickness(4, 0, 0, 0));
+            Grid.SetColumn(status, 2);
+            row.Children.Add(status);
         }
 
         var content = new Grid();
