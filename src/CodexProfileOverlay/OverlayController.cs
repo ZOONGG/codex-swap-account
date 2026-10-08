@@ -33,6 +33,7 @@ internal sealed class OverlayController : IDisposable
     private TrayIconService? trayIcon;
     private OverlayWindow? overlayWindow;
     private SettingsWindow? settingsWindow;
+    private readonly UpdateService updates = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexProfileOverlay", "updates.json"));
     private ProfileManagerWindow? profileManagerWindow;
     private HotkeyManager? hotkeyManager;
     private IReadOnlyList<ProfileInfo> profiles = [];
@@ -91,6 +92,13 @@ internal sealed class OverlayController : IDisposable
         }
 
         Tick();
+        _ = CheckForUpdatesAtStartupAsync();
+    }
+
+    private async Task CheckForUpdatesAtStartupAsync()
+    {
+        try { await updates.CheckAsync(false, disposalTokenSource.Token); }
+        catch (OperationCanceledException) { }
     }
 
     public void Dispose()
@@ -98,6 +106,7 @@ internal sealed class OverlayController : IDisposable
         disposalTokenSource.Cancel();
         timer.Stop();
         statusService.Dispose();
+        updates.Dispose();
         hotkeyManager?.Dispose();
         trayIcon?.Dispose();
         settingsWindow?.Close();
@@ -546,6 +555,7 @@ internal sealed class OverlayController : IDisposable
             localizer,
             statusService,
             backupMaintenance,
+            updates,
             SaveSettings,
             RefreshStatusIndicators,
             RefreshUsageForProfileAsync,

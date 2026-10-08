@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -17,6 +18,12 @@ internal sealed class SettingsWindow : Window
 {
     private static readonly FontFamily EmojiFont = new("Segoe UI Emoji");
     private readonly OverlaySettings settings;
+    private readonly UpdateService updates;
+    private readonly CancellationTokenSource updateLifetime = new();
+    private CancellationTokenSource? downloadCancellation;
+    private bool checkingUpdate, downloadingUpdate;
+    private string? updateMessage;
+    private double updateProgress;
     private readonly Action<OverlaySettings> save;
     private readonly Action statusChanged;
     private readonly Func<string, Task> refreshUsage;
@@ -54,6 +61,7 @@ internal sealed class SettingsWindow : Window
         Localizer localizer,
         ProfileStatusService statusService,
         BackupMaintenanceService backupMaintenance,
+        UpdateService updates,
         Action<OverlaySettings> save,
         Action statusChanged,
         Func<string, Task> refreshUsage,
@@ -69,6 +77,8 @@ internal sealed class SettingsWindow : Window
         Action exitApplication)
     {
         this.settings = settings;
+        this.updates = updates;
+        updates.Changed += UpdateChanged;
         this.profiles = profiles;
         this.localizer = localizer;
         this.statusService = statusService;
@@ -107,6 +117,9 @@ internal sealed class SettingsWindow : Window
         Closing += (_, _) => SaveGeometry();
         Closed += (_, _) =>
         {
+            updates.Changed -= UpdateChanged;
+            updateLifetime.Cancel();
+            downloadCancellation?.Cancel();
             localizer.LanguageChanged -= Rebuild;
             PreviewMouseDown -= OnPreviewMouseDownCommitNumber;
         };
@@ -242,7 +255,7 @@ internal sealed class SettingsWindow : Window
             AddNav(SettingsPage.Hotkeys, localizer["Hotkeys"]);
             AddNav(SettingsPage.Language, localizer["Language"]);
             AddNav(SettingsPage.Status, localizer["StatusAndLimits"]);
-            AddNav(SettingsPage.Advanced, localizer["Advanced"]);
+            AddNav(SettingsPage.Advanced, localizer["Advanced"] + (updates.HasUpdate ? " вЂў" : ""));
 
             pageTitle.Text = PageName(page);
             pageTitle.Foreground = Brush("StrongTextBrush");
@@ -335,12 +348,12 @@ internal sealed class SettingsWindow : Window
             });
             content.Children.Add(new TextBlock
             {
-                Text = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "Поддержать" : "Support",
+                Text = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "РџРѕРґРґРµСЂР¶Р°С‚СЊ" : "Support",
                 VerticalAlignment = VerticalAlignment.Center,
             });
             supportButton.Content = content;
             supportButton.ToolTip = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian
-                ? "Поддержать развитие Codex Swap Account"
+                ? "РџРѕРґРґРµСЂР¶Р°С‚СЊ СЂР°Р·РІРёС‚РёРµ Codex Swap Account"
                 : "Support Codex Swap Account development";
         }
     }
@@ -542,10 +555,10 @@ internal sealed class SettingsWindow : Window
             Foreground = Brush("StrongTextBrush"),
             Margin = new Thickness(0, 0, 0, 10),
         });
-        legend.Children.Add(LegendRow("⭐", localizer["RecommendedProfile"], localizer["RecommendedProfileHelp"]));
-        legend.Children.Add(LegendRow("🟢", localizer["HighCapacity"], localizer["HighCapacityHelp"]));
-        legend.Children.Add(LegendRow("🟡", localizer["MediumCapacity"], localizer["MediumCapacityHelp"]));
-        legend.Children.Add(LegendRow("🔴", localizer["LowCapacity"], localizer["LowCapacityHelp"]));
+        legend.Children.Add(LegendRow("в­ђ", localizer["RecommendedProfile"], localizer["RecommendedProfileHelp"]));
+        legend.Children.Add(LegendRow("рџџў", localizer["HighCapacity"], localizer["HighCapacityHelp"]));
+        legend.Children.Add(LegendRow("рџџЎ", localizer["MediumCapacity"], localizer["MediumCapacityHelp"]));
+        legend.Children.Add(LegendRow("рџ”ґ", localizer["LowCapacity"], localizer["LowCapacityHelp"]));
 
         legend.Children.Add(new TextBlock
         {
@@ -644,8 +657,8 @@ internal sealed class SettingsWindow : Window
         var presets = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
         foreach ((string Emoji, string Key) preset in new[]
         {
-            ("🟢", "PresetReady"), ("🟡", "PresetPartlyUsed"), ("🟠", "PresetLow"),
-            ("🔴", "PresetExhausted"), ("⏳", "PresetResetsSoon"), ("💤", "PresetInactive"), ("⚪", "PresetUnknown"),
+            ("рџџў", "PresetReady"), ("рџџЎ", "PresetPartlyUsed"), ("рџџ ", "PresetLow"),
+            ("рџ”ґ", "PresetExhausted"), ("вЏі", "PresetResetsSoon"), ("рџ’¤", "PresetInactive"), ("вљЄ", "PresetUnknown"),
         })
         {
             var button = new Button { Content = EmojiLabel(preset.Emoji, localizer[preset.Key]), Margin = new Thickness(0, 0, 8, 8) };
@@ -767,7 +780,7 @@ internal sealed class SettingsWindow : Window
 
     private static FrameworkElement CreateIndicatorVisual(string indicator, double size)
     {
-        if (indicator == "⭐")
+        if (indicator == "в­ђ")
         {
             return new Viewbox
             {
@@ -787,11 +800,11 @@ internal sealed class SettingsWindow : Window
 
         Color? color = indicator switch
         {
-            "🟢" => Color.FromRgb(34, 197, 94),
-            "🟡" => Color.FromRgb(250, 204, 21),
-            "🟠" => Color.FromRgb(249, 115, 22),
-            "🔴" => Color.FromRgb(239, 68, 68),
-            "⚪" => Color.FromRgb(229, 231, 235),
+            "рџџў" => Color.FromRgb(34, 197, 94),
+            "рџџЎ" => Color.FromRgb(250, 204, 21),
+            "рџџ " => Color.FromRgb(249, 115, 22),
+            "рџ”ґ" => Color.FromRgb(239, 68, 68),
+            "вљЄ" => Color.FromRgb(229, 231, 235),
             _ => null,
         };
 
@@ -867,7 +880,7 @@ internal sealed class SettingsWindow : Window
 
         foreach (UsageLimitWindow window in UsageIntelligence.GetKnownWindows(snapshot))
         {
-            string reset = window.ResetAt is null ? string.Empty : $" · {localizer["ResetsAt"]} {UsageDisplayFormatter.FormatLocal(window.ResetAt.Value)}";
+            string reset = window.ResetAt is null ? string.Empty : $" В· {localizer["ResetsAt"]} {UsageDisplayFormatter.FormatLocal(window.ResetAt.Value)}";
             lines.Add($"{window.Name}: {window.RemainingPercent}%{reset}");
         }
         lines.Add($"{localizer["LastUpdated"]}: {UsageDisplayFormatter.FormatLocal(snapshot.CapturedAt)}");
@@ -908,6 +921,7 @@ internal sealed class SettingsWindow : Window
     private UIElement BuildAdvancedPage()
     {
         var stack = PageStack();
+        stack.Children.Add(BuildUpdateCard());
         BackupStorageSummary storage = backupMaintenance.GetStorageSummary();
         stack.Children.Add(Card(new TextBlock
         {
@@ -938,6 +952,104 @@ internal sealed class SettingsWindow : Window
             (localizer["ImportSettings"], "M 12 15 L 12 4 M 8 8 L 12 4 L 16 8 M 5 19 L 19 19", ImportSettings, false),
             (localizer["ExitApplication"], "M 10 5 L 5 5 L 5 19 L 10 19 M 13 8 L 17 12 L 13 16 M 8 12 L 17 12", exitApplication, false))));
         return stack;
+    }
+
+    private void UpdateChanged()
+    {
+        if (!updateLifetime.IsCancellationRequested)
+            _ = Dispatcher.InvokeAsync(() => { if (!updateLifetime.IsCancellationRequested) Rebuild(); });
+    }
+
+    private UIElement BuildUpdateCard()
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock { Text = localizer["Updates"], FontSize = 18, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) });
+        string state = checkingUpdate ? "UpdateChecking" : updates.ErrorKey ?? (updates.Cache.LastSuccess is null ? "UpdateNotChecked" : updates.HasUpdate ? "UpdateAvailable" : "UpdateCurrent");
+        var heading = new StackPanel { Orientation = Orientation.Horizontal };
+        if (state == "UpdateCurrent") heading.Children.Add(new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse("M 2 8 L 6 12 L 14 3"), Stroke = Brush("SuccessBrush"), StrokeThickness = 2,
+            Width = 18, Height = 18, Margin = new Thickness(1, 2, 8, 2),
+        });
+        heading.Children.Add(new TextBlock { Text = localizer[state], TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(heading);
+        panel.Children.Add(new TextBlock { Text = "v" + updates.CurrentVersion + (updates.HasUpdate ? " в†’ " + updates.Cache.Release!.Tag : ""), Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 6, 0, 8) });
+        if (updates.HasUpdate && updates.Cache.Release is { } release)
+        {
+            panel.Children.Add(new TextBlock { Text = release.Published.ToLocalTime().ToString("d", CultureInfo.CurrentCulture), Foreground = Brush("MutedTextBrush") });
+            panel.Children.Add(new ScrollViewer { MaxHeight = 120, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 8), Content = new TextBlock { Text = release.Notes.Length > 2000 ? release.Notes[..2000] + "вЂ¦" : release.Notes, TextWrapping = TextWrapping.Wrap } });
+        }
+        var actions = new WrapPanel();
+        Button ActionButton(string key, RoutedEventHandler action)
+        {
+            var button = new Button { Content = localizer[key], Margin = new Thickness(0, 4, 8, 4) };
+            button.Click += action;
+            actions.Children.Add(button);
+            return button;
+        }
+        ActionButton("UpdateCheck", async (_, _) =>
+        {
+            checkingUpdate = true; updateMessage = null; Rebuild();
+            try { await updates.CheckAsync(true, updateLifetime.Token); }
+            catch (OperationCanceledException) { }
+            finally { checkingUpdate = false; if (!updateLifetime.IsCancellationRequested) Rebuild(); }
+        }).IsEnabled = !checkingUpdate && !downloadingUpdate;
+        if (updates.HasUpdate)
+        {
+            ActionButton("UpdateDownload", async (_, _) => await DownloadUpdateAsync()).IsEnabled = !downloadingUpdate && !checkingUpdate;
+            ActionButton("UpdateGitHub", (_, _) => OpenExternalUrl(updates.Cache.Release!.Url));
+        }
+        if (downloadingUpdate) ActionButton("UpdateCancel", (_, _) => downloadCancellation?.Cancel());
+        panel.Children.Add(actions);
+        if (downloadingUpdate) panel.Children.Add(new ProgressBar { Minimum = 0, Maximum = 100, Value = updateProgress, Height = 6, Margin = new Thickness(0, 8, 0, 8) });
+        if (updateMessage is not null) panel.Children.Add(new TextBlock { Text = localizer[updateMessage], TextWrapping = TextWrapping.Wrap, Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 8, 0, 0) });
+        return Card(panel);
+    }
+
+    private async Task DownloadUpdateAsync()
+    {
+        downloadingUpdate = true; updateProgress = 0; updateMessage = null;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(updateLifetime.Token);
+        downloadCancellation = cancellation;
+        Rebuild();
+        string? temp = null;
+        try
+        {
+            var progress = new Progress<double>(value =>
+            {
+                if (updateLifetime.IsCancellationRequested) return;
+                updateProgress = value;
+                // Update the existing bar without rebuilding controls or moving keyboard focus.
+                if (page == SettingsPage.Advanced) UpdateProgressBar(contentHost, value);
+            });
+            temp = await updates.DownloadAsync(progress, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            var dialog = new Microsoft.Win32.SaveFileDialog { FileName = UpdateService.ZipName, Filter = "ZIP (*.zip)|*.zip", DefaultExt = ".zip" };
+            if (dialog.ShowDialog(this) == true)
+            {
+                string destination = dialog.FileName;
+                await Task.Run(() => File.Copy(temp, destination, true), cancellation.Token);
+                updateMessage = "UpdateSaved";
+            }
+        }
+        catch (OperationCanceledException) { updateMessage = "UpdateCancelled"; }
+        catch (Exception e) when (e is InvalidDataException or IOException or HttpRequestException or UnauthorizedAccessException or InvalidOperationException) { updateMessage = "UpdateDownloadFailed"; }
+        finally
+        {
+            if (temp is not null) { try { File.Delete(temp); } catch (IOException) { } }
+            downloadCancellation = null; downloadingUpdate = false;
+            if (!updateLifetime.IsCancellationRequested) Rebuild();
+        }
+    }
+
+    private static void UpdateProgressBar(DependencyObject parent, double value)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is ProgressBar bar) bar.Value = value;
+            else UpdateProgressBar(child, value);
+        }
     }
 
     private void CleanLegacyBackups()
@@ -1000,7 +1112,7 @@ internal sealed class SettingsWindow : Window
     }
 
     private static string FormatTimestamp(DateTimeOffset? timestamp)
-        => timestamp?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "—";
+        => timestamp?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "вЂ”";
 
     private UIElement SettingCheck(string title, string subtitle, bool value, Action<bool> setter, bool enabled = true)
     {

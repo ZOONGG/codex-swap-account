@@ -7,6 +7,21 @@ public static class LocalizationCatalog
 {
     private static readonly IReadOnlyDictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        ["Updates"] = "Application updates",
+        ["UpdateCheck"] = "Check for updates",
+        ["UpdateDownload"] = "Download update",
+        ["UpdateGitHub"] = "View on GitHub",
+        ["UpdateCancel"] = "Cancel",
+        ["UpdateCurrent"] = "You’re up to date",
+        ["UpdateAvailable"] = "Update available",
+        ["UpdateNotChecked"] = "Check for a newer release",
+        ["UpdateChecking"] = "Checking for updates…",
+        ["UpdateUnavailable"] = "Updates unavailable. Check your connection and retry.",
+        ["UpdateRateLimited"] = "GitHub request limit reached. Please retry later.",
+        ["UpdateSaved"] = "Verified ZIP saved. Installation is manual.",
+        ["UpdateCancelled"] = "Download cancelled.",
+        ["UpdateDownloadFailed"] = "Download failed. Official assets and a matching SHA-256 checksum are required.",
+
         ["OpenCodex"] = "Open Codex",
         ["ShowSwitcher"] = "Show switcher",
         ["HideSwitcher"] = "Hide switcher",
@@ -208,6 +223,21 @@ public static class LocalizationCatalog
 
     private static readonly IReadOnlyDictionary<string, string> Russian = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        ["Updates"] = "Обновления приложения",
+        ["UpdateCheck"] = "Проверить обновления",
+        ["UpdateDownload"] = "Скачать обновление",
+        ["UpdateGitHub"] = "Открыть на GitHub",
+        ["UpdateCancel"] = "Отмена",
+        ["UpdateCurrent"] = "У вас последняя версия",
+        ["UpdateAvailable"] = "Доступно обновление",
+        ["UpdateNotChecked"] = "Проверьте наличие новой версии",
+        ["UpdateChecking"] = "Проверка обновлений…",
+        ["UpdateUnavailable"] = "Обновления недоступны. Проверьте соединение и повторите попытку.",
+        ["UpdateRateLimited"] = "Достигнут лимит запросов GitHub. Повторите позже.",
+        ["UpdateSaved"] = "Проверенный ZIP сохранён. Установка выполняется вручную.",
+        ["UpdateCancelled"] = "Загрузка отменена.",
+        ["UpdateDownloadFailed"] = "Загрузка не удалась. Нужны официальные файлы и совпадающая контрольная сумма SHA-256.",
+
         ["OpenCodex"] = "Открыть Codex",
         ["ShowSwitcher"] = "Показать переключатель",
         ["HideSwitcher"] = "Скрыть переключатель",
