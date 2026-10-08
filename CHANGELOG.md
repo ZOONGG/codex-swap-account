@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add accounts through isolated official browser login with cancellation, timeout and bundled runtime discovery.
+- Reauthorize accounts while preserving metadata and old credentials until success; active accounts require a confirmed safe Codex restart.
+- Show conservative account availability and offer manual official authentication-state checks without forced token rotation.
+- Include source revision and executable hash in both portable and Windows installer packages; validate the current payload with isolated installer smoke tests.
+
 - Compact icon-only Settings actions; the applied confirmation fades after two seconds and clears on navigation.
 - Open support as an embedded, keyboard-accessible Settings overlay with rounded amount inputs, Telegram star artwork and branded cryptocurrency icons.
 

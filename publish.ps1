@@ -43,6 +43,18 @@ if (Test-Path -LiteralPath $Output) {
     -o $Output
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+$head = & git -C $repo rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Cannot determine source revision.' }
+$sourceChanges = & git -C $repo status --porcelain --untracked-files=normal
+$buildInfo = [ordered]@{
+    commit = $head.Trim()
+    workingTreeClean = -not [bool]$sourceChanges
+    configuration = $Configuration
+    runtime = 'win-x64'
+    executableSha256 = (Get-FileHash -LiteralPath (Join-Path $Output 'CodexProfileOverlay.exe') -Algorithm SHA256).Hash
+}
+$buildInfo | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Output 'build-info.json') -Encoding utf8
+
 $zip = Join-Path $repo "artifacts\CodexProfileOverlay-win-x64-portable.zip"
 if (Test-Path -LiteralPath $zip) {
     Remove-Item -LiteralPath $zip -Force
