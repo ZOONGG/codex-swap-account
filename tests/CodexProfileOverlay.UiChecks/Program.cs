@@ -34,7 +34,7 @@ internal static class Program
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var source = System.Xml.Linq.XDocument.Load(Path.Combine(AppContext.BaseDirectory, "AppResources.xaml"));
@@ -51,12 +51,14 @@ internal static class Program
             foreach (var language in new[] { LanguagePreference.English, LanguagePreference.Russian })
             {
                 App.ApplyTheme(theme);
+                if (args.Contains("--hover-only")) { CheckPopup(temp, language); continue; }
                 CheckSettings(temp, theme, language);
                 CheckProfileManager(language);
                 CheckAmounts(theme, language);
                 CheckPopup(temp, language);
             }
-            Console.WriteLine("PASS: Left info/bottom popup in expanded/compact modes; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto presets/manual input; input rendering; scrollbar dark/light and RU/EN.");
+            if (args.Contains("--hover-only")) { Console.WriteLine("PASS: Hover open/leave, popup entry, profile replacement, card click isolation and dimensions, bottom placement in expanded/compact, dark/light and RU/EN."); return; }
+            Console.WriteLine("PASS: Hover/bottom popup in expanded/compact modes; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto presets/manual input; input rendering; scrollbar dark/light and RU/EN.");
         }
         finally { app.Shutdown(); Directory.Delete(temp, true); }
     }
@@ -153,6 +155,8 @@ internal static class Program
         var localizerType = typeof(App).Assembly.GetType("CodexProfileOverlay.Localizer")!;
         type.GetProperty("Localizer")!.SetValue(window, Activator.CreateInstance(localizerType, language));
         var profile = new ProfileInfo("test", temp, "unused");
+        int refreshCalls = 0;
+        type.GetProperty("OnRefreshUsage")!.SetValue(window, (Func<string, Task>)(_ => { refreshCalls++; return Task.CompletedTask; }));
         window.Left = 400; window.Top = 200;
         window.Show();
         foreach (bool compact in new[] { false, true })
@@ -166,28 +170,30 @@ internal static class Program
             double originalWidth = account.DesiredSize.Width;
             var row = (Button)Invoke(window, "ProfileWithDetails", profile, account)!;
             Check(ReferenceEquals(row, account), "Info must be embedded in the original profile card");
-            var content = (Grid)account.Content;
-            var info = (Button)content.Children[0];
+            Check(!Descendants(account).OfType<Button>().Any(), "Card must contain no nested info button");
             int accountClicks = 0;
             account.Click += (_, _) => accountClicks++;
             var shell = (Border)Field(window, "shell");
             var compactPopup = (Popup)Field(window, "compactPopup");
+            var otherAccount = (Button)Invoke(window, "CreateProfileButton", new ProfileInfo("other", temp, "unused"), false)!;
+            Invoke(window, "ProfileWithDetails", new ProfileInfo("other", temp, "unused"), otherAccount);
+            var cards = new StackPanel();
+            cards.Children.Add(row);
+            cards.Children.Add(otherAccount);
             if (compact)
             {
                 shell.Child = new Button { Content = "Profiles" };
                 compactPopup.PlacementTarget = shell;
-                compactPopup.Child = row;
+                compactPopup.Child = cards;
                 compactPopup.IsOpen = true;
             }
-            else shell.Child = row;
+            else shell.Child = cards;
             row.UpdateLayout();
             Check(Math.Abs(account.ActualWidth + account.Margin.Left + account.Margin.Right - originalWidth) < 1, "Embedding info must preserve profile width");
-            Point infoPosition = info.TranslatePoint(new Point(), account);
-            Point bodyPosition = ((UIElement)content.Children[1]).TranslatePoint(new Point(), account);
-            Check(infoPosition.X >= 0 && infoPosition.X + info.ActualWidth <= account.ActualWidth && infoPosition.Y >= 0 && infoPosition.Y + info.ActualHeight <= account.ActualHeight, "Info must be inside the profile bounds");
-            Check(infoPosition.X + info.ActualWidth <= bodyPosition.X, "Info must precede the profile avatar/content");
-            info.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            Check(accountClicks == 0, "Info must never trigger account click");
+            account.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+            Check(!((Popup)Field(window, "usagePopup")).IsOpen, "Hover must wait before opening");
+            Invoke(window, "OpenPendingUsage");
+            Check(accountClicks == 0, "Hover must never trigger account click");
             window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             var popup = (Popup)Field(window, "usagePopup");
             Check(popup.Placement == PlacementMode.Bottom, "Usage popup must retain original bottom placement");
@@ -197,11 +203,36 @@ internal static class Program
             panel.UpdateLayout();
             var position = panel.PointToScreen(new Point());
             Check(position.X >= 0 && position.Y >= 0 && position.X + panel.ActualWidth <= SystemParameters.PrimaryScreenWidth + 1 && position.Y + panel.ActualHeight <= SystemParameters.PrimaryScreenHeight + 1, "Usage popup must fit screen");
+            account.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseLeaveEvent });
+            Check(popup.IsOpen, "Leave must allow time to cross into popup");
+            panel.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+            Check(!((System.Windows.Threading.DispatcherTimer)Field(window, "usageCloseTimer")).IsEnabled, "Entering popup must cancel close");
+            Invoke(window, "ScheduleUsage", "other", otherAccount);
+            Check(!popup.IsOpen, "Entering adjacent card must immediately hide stale panel");
+            Invoke(window, "OpenPendingUsage");
+            Check(ReferenceEquals(popup.PlacementTarget, otherAccount) && (string)Field(window, "usageProfile") == "other", "Hover must replace profile data");
+            Invoke(window, "CloseUsageIfOutside");
+            Check(!popup.IsOpen, "Leaving both surfaces must close popup");
             popup.IsOpen = false;
             account.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Check(accountClicks == 1, "Remaining card must stay clickable");
+            Check(refreshCalls == 0, "Hover must use cache without refreshing limits");
+            Invoke(window, "ScheduleUsage", "test", account);
+            Invoke(window, "ScheduleUsageClose");
+            Check(!((System.Windows.Threading.DispatcherTimer)Field(window, "usageOpenTimer")).IsEnabled, "Rapid leave must cancel pending opening");
+            Invoke(window, "CloseUsageIfOutside");
         }
         window.Close();
+    }
+
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            yield return child;
+            foreach (var nested in Descendants(child)) yield return nested;
+        }
     }
 
     private static object appResource(object key) => Application.Current.FindResource(key);

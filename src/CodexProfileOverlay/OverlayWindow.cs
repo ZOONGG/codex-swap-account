@@ -25,7 +25,12 @@ internal sealed class OverlayWindow : Window
     private readonly OverlayLayoutService layoutService = new();
     private readonly Border shell = new();
     private readonly Popup compactPopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom };
-    private readonly Popup usagePopup = new() { AllowsTransparency = true, StaysOpen = false, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.None };
+    private readonly Popup usagePopup = new() { AllowsTransparency = true, StaysOpen = true, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.None };
+    private readonly System.Windows.Threading.DispatcherTimer usageOpenTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly System.Windows.Threading.DispatcherTimer usageCloseTimer = new() { Interval = TimeSpan.FromMilliseconds(200) };
+    private Button? pendingUsageAccount;
+    private string? pendingUsageProfile;
+    private bool usageKeyboardAccess;
     private string? usageProfile;
     public Func<string, Task>? OnRefreshUsage { get; set; }
     private readonly List<Button> profileButtons = [];
@@ -64,17 +69,20 @@ internal sealed class OverlayWindow : Window
         SnapsToDevicePixels = true;
         ApplyScale();
 
+        usageOpenTimer.Tick += (_, _) => OpenPendingUsage();
+        usageCloseTimer.Tick += (_, _) => CloseUsageIfOutside();
         usagePopup.Opened += (_, _) => compactPopup.StaysOpen = true;
         usagePopup.Closed += (_, _) =>
         {
+            CancelUsageTimers();
             compactPopup.StaysOpen = false;
-            compactPopup.IsOpen = false;
-            indicatorSignature = BuildIndicatorSignature();
-            RebuildContent();
         };
+        compactPopup.Closed += (_, _) => { CancelUsageTimers(); usagePopup.IsOpen = false; };
+        Closed += (_, _) => CancelUsageTimers();
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape) return;
+            CancelUsageTimers();
             usagePopup.IsOpen = false;
             compactPopup.IsOpen = false;
             e.Handled = true;
@@ -89,6 +97,7 @@ internal sealed class OverlayWindow : Window
         {
             if (!IsVisible)
             {
+                CancelUsageTimers();
                 compactPopup.IsOpen = false;
                 usagePopup.IsOpen = false;
             }
@@ -167,6 +176,7 @@ internal sealed class OverlayWindow : Window
         bool geometryChanged = placementDirty || !NearlyEqual(clientBounds, lastClientBounds);
         if (geometryChanged)
         {
+            CancelUsageTimers();
             usagePopup.IsOpen = false;
             UpdateLayout();
         }
@@ -254,6 +264,7 @@ internal sealed class OverlayWindow : Window
 
     public void SetSwitching(bool switching)
     {
+        CancelUsageTimers();
         isSwitching = switching;
         compactPopup.IsOpen = false;
         usagePopup.IsOpen = false;
@@ -275,6 +286,8 @@ internal sealed class OverlayWindow : Window
 
     private void RebuildContent()
     {
+        CancelUsageTimers();
+        usagePopup.IsOpen = false;
         placementDirty = true;
         Width = LogicalWidth * SanitizedScale;
         shell.Height = double.NaN;
@@ -447,38 +460,67 @@ internal sealed class OverlayWindow : Window
 
     private UIElement ProfileWithDetails(ProfileInfo profile, Button account)
     {
-        // Keep the existing card dimensions; both hit targets share its chrome.
         account.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         if (double.IsNaN(account.Width) && double.IsFinite(account.MaxWidth))
             account.Width = Math.Max(account.MinWidth, account.DesiredSize.Width - account.Margin.Left - account.Margin.Right);
-        var original = (UIElement)account.Content;
-        account.Content = null;
-        var row = new Grid();
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var info = new Button
+        account.MouseEnter += (_, _) => { usageKeyboardAccess = false; ScheduleUsage(profile.Name, account); };
+        account.MouseLeave += (_, _) => ScheduleUsageClose();
+        account.GotKeyboardFocus += (_, _) => { if (!account.IsMouseOver) { usageKeyboardAccess = true; ScheduleUsage(profile.Name, account); } };
+        account.LostKeyboardFocus += (_, _) => ScheduleUsageClose();
+        account.PreviewKeyDown += (_, e) =>
         {
-            Content = "ⓘ", ToolTip = Localizer?["UsageDetails"],
-            Width = 18, Height = 24, MinWidth = 0, MinHeight = 0,
-            Padding = new Thickness(0), Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
-            Style = (Style)FindResource("HeaderActionButtonStyle"),
+            if (e.Key == Key.Escape) { CancelUsageTimers(); usagePopup.IsOpen = false; e.Handled = true; }
+            else if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && usagePopup.IsOpen && ReferenceEquals(usagePopup.PlacementTarget, account))
+            {
+                e.Handled = usagePopup.Child.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+            }
         };
-        System.Windows.Automation.AutomationProperties.SetName(info, (Localizer?["UsageDetails"] ?? "Account limits") + " " + profile.DisplayName);
-        info.Click += (_, e) => {
-            e.Handled = true;
-            usageProfile = profile.Name;
-            usagePopup.PlacementTarget = account;
-            usagePopup.Child = BuildUsagePanel(profile.Name);
-            usagePopup.IsOpen = true;
-        };
-        row.Children.Add(info);
-        Grid.SetColumn(original, 1);
-        row.Children.Add(original);
-        account.Content = row;
-        account.HorizontalContentAlignment = HorizontalAlignment.Stretch;
-        account.Padding = new Thickness(4, account.Padding.Top, 4, account.Padding.Bottom);
+        account.PreviewMouseLeftButtonDown += (_, _) => { CancelUsageTimers(); usagePopup.IsOpen = false; };
+        account.ToolTip = null;
         return account;
+    }
+
+    private void CancelUsageTimers()
+    {
+        usageOpenTimer.Stop();
+        usageCloseTimer.Stop();
+        pendingUsageAccount = null;
+        pendingUsageProfile = null;
+    }
+
+    private void ScheduleUsage(string profileId, Button account)
+    {
+        CancelUsageTimers();
+        if (usagePopup.IsOpen && !ReferenceEquals(usagePopup.PlacementTarget, account)) usagePopup.IsOpen = false;
+        pendingUsageAccount = account;
+        pendingUsageProfile = profileId;
+        usageOpenTimer.Start();
+    }
+
+    private void OpenPendingUsage()
+    {
+        usageOpenTimer.Stop();
+        if (pendingUsageAccount is not { IsVisible: true, IsEnabled: true } account || pendingUsageProfile is null) return;
+        usageProfile = pendingUsageProfile;
+        usagePopup.PlacementTarget = account;
+        usagePopup.Child = BuildUsagePanel(usageProfile);
+        usagePopup.IsOpen = true;
+    }
+
+    private void ScheduleUsageClose()
+    {
+        usageOpenTimer.Stop();
+        usageCloseTimer.Stop();
+        usageCloseTimer.Start();
+    }
+
+    private void CloseUsageIfOutside()
+    {
+        usageCloseTimer.Stop();
+        if (usagePopup.PlacementTarget is UIElement account && (account.IsMouseOver || (usageKeyboardAccess && account.IsKeyboardFocusWithin))) return;
+        if (usagePopup.Child is UIElement panel && (panel.IsMouseOver || (usageKeyboardAccess && panel.IsKeyboardFocusWithin))) return;
+        CancelUsageTimers();
+        usagePopup.IsOpen = false;
     }
 
     private UIElement BuildUsagePanel(string profileId)
@@ -492,8 +534,12 @@ internal sealed class OverlayWindow : Window
             Content = UsageDetailsView.Build(profile?.DisplayName ?? profileId, snapshot, error,
                 string.Equals(profileId, recommendedProfile, StringComparison.OrdinalIgnoreCase), settings, Localizer!, async () => {
                     if (OnRefreshUsage is not null) await OnRefreshUsage(profileId);
-                    if (usagePopup.IsOpen) usagePopup.Child = BuildUsagePanel(profileId);
+                    if (usagePopup.IsOpen && usageProfile == profileId) usagePopup.Child = BuildUsagePanel(profileId);
                 }) };
+        border.MouseEnter += (_, _) => usageCloseTimer.Stop();
+        border.MouseLeave += (_, _) => ScheduleUsageClose();
+        border.GotKeyboardFocus += (_, _) => usageCloseTimer.Stop();
+        border.LostKeyboardFocus += (_, _) => ScheduleUsageClose();
         border.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { usagePopup.IsOpen = false; e.Handled = true; } };
         return border;
     }
@@ -527,6 +573,7 @@ internal sealed class OverlayWindow : Window
         if (!string.IsNullOrEmpty(indicator))
         {
             var status = CreateIndicator(profile.Name, indicator, new Thickness(4, 0, 0, 0));
+            status.Visibility = Visibility.Hidden;
             Grid.SetColumn(status, 2);
             row.Children.Add(status);
         }
@@ -732,19 +779,8 @@ internal sealed class OverlayWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        if (isActive)
-        {
-            grid.Children.Add(new System.Windows.Shapes.Path
-            {
-                Data = Geometry.Parse("M 2 7 L 6 11 L 14 3"),
-                Stroke = FindBrush("AccentBrush"),
-                StrokeThickness = 1.8,
-                Width = 16,
-                Height = 16,
-                Stretch = Stretch.Uniform,
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-        }
+        grid.ColumnDefinitions[0].Width = new GridLength(30);
+        grid.Children.Add(CreateAvatar(profile.Initials, profile.Accent, 22));
 
         var label = new TextBlock
         {
@@ -760,6 +796,7 @@ internal sealed class OverlayWindow : Window
         if (!string.IsNullOrEmpty(indicator))
         {
             FrameworkElement icon = CreateIndicatorVisual(indicator, 13);
+            icon.Visibility = Visibility.Hidden;
             icon.Margin = new Thickness(10, 0, 0, 0);
             Grid.SetColumn(icon, 2);
             grid.Children.Add(icon);
