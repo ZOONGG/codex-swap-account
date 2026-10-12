@@ -31,6 +31,21 @@ public sealed class UpdateServiceTests
         await service.CheckAsync(true); Assert.Equal(expected, service.HasUpdate); Assert.Null(service.ErrorKey);
     }
     [Theory]
+    [InlineData("v1.0.0", false)]
+    [InlineData("v1.1.0", false)]
+    [InlineData("v1.1.1", true)]
+    [InlineData("v1.2.0", true)]
+    public async Task Release110DetectsOnlyNewer(string tag, bool expected)
+    {
+        using var temp = new TempDirectory();
+        using var handler = new Handler((_, _) => Task.FromResult(Response(Release(tag))));
+        using var service = new UpdateService(Path.Combine(temp.Path, "update.json"), new HttpClient(handler));
+        Assert.Equal("1.1.0", service.CurrentVersion);
+        await service.CheckAsync(true);
+        Assert.Equal(expected, service.HasUpdate);
+        Assert.Null(service.ErrorKey);
+    }
+    [Theory]
     [InlineData("1.10.0", "1.9.0")] [InlineData("1.0.0", "1.0.0-rc.9")] [InlineData("1.0.0-rc.10", "1.0.0-rc.2")] [InlineData("1.0.0-beta", "1.0.0-1")]
     public void SemverOrdering(string a, string b) => Assert.True(ReleaseVersion.Parse(a).CompareTo(ReleaseVersion.Parse(b)) > 0);
     [Theory]

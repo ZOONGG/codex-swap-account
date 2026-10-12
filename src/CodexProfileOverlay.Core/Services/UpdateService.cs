@@ -31,7 +31,7 @@ public sealed class UpdateService : IDisposable
     {
         this.cachePath = cachePath;
         now = clock ?? (() => DateTimeOffset.UtcNow);
-        CurrentVersion = currentVersion ?? typeof(UpdateService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0.0";
+        CurrentVersion = currentVersion ?? typeof(UpdateService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? throw new InvalidOperationException("Application version metadata is missing.");
         http = client ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
         try
         {

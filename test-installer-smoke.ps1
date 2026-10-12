@@ -1,6 +1,8 @@
 param(
     [string]$InnoCompiler = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
-    [string]$PublishedPayload = ""
+    [string]$PublishedPayload = "",
+    [string]$PreviousPayload = "",
+    [string]$TargetVersion = "1.0.1"
 )
 $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
@@ -44,9 +46,10 @@ function Assert-Sentinels {
 try {
     New-Item -Path $runPath -Force | Out-Null
     New-ItemProperty -Path $runPath -Name $identity -Value '"C:\fake-portable\CodexProfileOverlay.exe"' -PropertyType String -Force | Out-Null
-    foreach ($version in @('1.0.0', '1.0.1')) {
-        if ($PublishedPayload) {
-            Copy-Item -Path (Join-Path $PublishedPayload '*') -Destination $payload -Recurse -Force
+    foreach ($version in @('1.0.0', $TargetVersion)) {
+        $selectedPayload = if ($version -eq '1.0.0' -and $PreviousPayload) { $PreviousPayload } else { $PublishedPayload }
+        if ($selectedPayload) {
+            Copy-Item -Path (Join-Path $selectedPayload '*') -Destination $payload -Recurse -Force
         } else {
             Set-Content -LiteralPath (Join-Path $payload 'CodexProfileOverlay.exe') -Value "FAKE PAYLOAD $version - NEVER EXECUTE"
         }
@@ -59,8 +62,9 @@ try {
         if ($metadata.InstallLocation.TrimEnd('\') -ne $installed.TrimEnd('\')) { throw 'InstallLocation missing or incorrect' }
         $startup = (Get-ItemProperty -LiteralPath $runPath).$identity
         if ($startup -ne ('"' + (Join-Path $installed 'CodexProfileOverlay.exe') + '"')) { throw 'Startup path not migrated' }
-        foreach ($file in Get-ChildItem -LiteralPath $payload -File) {
-            if ((Get-FileHash -LiteralPath $file.FullName).Hash -ne (Get-FileHash -LiteralPath (Join-Path $installed $file.Name)).Hash) {
+        foreach ($file in Get-ChildItem -LiteralPath $payload -File -Recurse) {
+            $relative = [IO.Path]::GetRelativePath($payload, $file.FullName)
+            if ((Get-FileHash -LiteralPath $file.FullName).Hash -ne (Get-FileHash -LiteralPath (Join-Path $installed $relative)).Hash) {
                 throw "Installed payload mismatch: $($file.Name)"
             }
         }

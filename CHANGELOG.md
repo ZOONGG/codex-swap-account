@@ -1,20 +1,21 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-10-12
 
-- Add accounts through isolated official browser login with cancellation, timeout and bundled runtime discovery.
-- Reauthorize accounts while preserving metadata and old credentials until success; active accounts require a confirmed safe Codex restart.
-- Show conservative account availability and offer manual official authentication-state checks without forced token rotation.
-- Include source revision and executable hash in both portable and Windows installer packages; validate the current payload with isolated installer smoke tests.
+### Added
+- One-click Windows updates with verified downloads and a per-user Windows installer.
+- Official browser login and account reauthorization with cancellation and timeout handling.
+- Detailed cached 5-hour and weekly account limits on hover and optional tray indicators.
 
-- Compact icon-only Settings actions; the applied confirmation fades after two seconds and clears on navigation.
-- Open support as an embedded, keyboard-accessible Settings overlay with rounded amount inputs, Telegram star artwork and branded cryptocurrency icons.
+### Changed
+- Improved Codex Desktop shutdown, relaunch, process identity and tray compatibility.
+- Clearer account availability and status indicators.
+- Redesigned Support UI embedded in Settings, with improved amount inputs and artwork.
+- More compact Settings actions and improved overlay focus and window behavior.
 
-- Hardened Windows Codex Desktop identity using the official package family and registered manifest executable, including packages whose desktop process is `ChatGPT.exe`.
-- Track desktop descendants with retained handles, handle respawns, and require a stable 750 ms exit before replacing authorization. Preflight registered application activation before shutdown when automatic relaunch is enabled.
-- Remove only the known stale Codex tray GUID after verified shutdown; cleanup failure logs a safe warning and does not prevent account switching.
-- Discover versioned bundled Codex CLI executables using executable metadata/semantic versions, with deterministic fallback ordering; keep the structured app-server rate-limit provider.
-- Windows desktop lifecycle and tray compatibility improvements inspired by/adapted from fixes contributed in [HYFOAM/codex-swap-account](https://github.com/HYFOAM/codex-swap-account), particularly commits `2d200c0`, `5dbfe6a`, and `881b8b7`.
+### Fixed
+- Profile creation and auxiliary window lifecycle issues.
+- Support amount input behavior and Settings window lifecycle.
 
 ## 1.0.0 - 2026-09-20
 
