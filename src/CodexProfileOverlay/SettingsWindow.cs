@@ -24,7 +24,10 @@ internal sealed class SettingsWindow : Window
     private bool checkingUpdate, downloadingUpdate;
     private string? updateMessage;
     private double updateProgress;
+    private TextBlock? updateProgressText;
     private readonly Func<bool> canInstallUpdate;
+    private readonly Action<bool> setInstallingUpdate;
+    private bool installingUpdate;
     private readonly bool installed;
     private readonly Action<OverlaySettings> save;
     private readonly Action statusChanged;
@@ -80,14 +83,17 @@ internal sealed class SettingsWindow : Window
         Action resetPosition,
         Action resetSettings,
         Action exitApplication,
-        Func<bool> canInstallUpdate)
+        Func<bool> canInstallUpdate,
+        Action<bool> setInstallingUpdate)
     {
         this.settings = settings;
         this.updates = updates;
         this.canInstallUpdate = canInstallUpdate;
+        this.setInstallingUpdate = setInstallingUpdate;
         using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(InstallationMode.UninstallKey))
             installed = InstallationMode.IsInstalled(Environment.ProcessPath!, key?.GetValue("InstallLocation") as string);
         updates.Changed += UpdateChanged;
+        updates.ProgressChanged += UpdateDownloadProgressChanged;
         this.profiles = profiles;
         this.localizer = localizer;
         this.statusService = statusService;
@@ -135,6 +141,7 @@ internal sealed class SettingsWindow : Window
             appliedTimer.Stop();
             dismissSupport?.Invoke();
             updates.Changed -= UpdateChanged;
+            updates.ProgressChanged -= UpdateDownloadProgressChanged;
             updateLifetime.Cancel();
             downloadCancellation?.Cancel();
             localizer.LanguageChanged -= Rebuild;
@@ -902,21 +909,41 @@ internal sealed class SettingsWindow : Window
             _ = Dispatcher.InvokeAsync(() => { if (!updateLifetime.IsCancellationRequested) Rebuild(); });
     }
 
+    private void UpdateDownloadProgressChanged(double value)
+    {
+        if (updateLifetime.IsCancellationRequested) return;
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (updateLifetime.IsCancellationRequested || page != SettingsPage.Advanced) return;
+            UpdateProgressBar(contentHost, value);
+            if (updateProgressText is not null) updateProgressText.Text = localizer.Format("UpdateDownloading", (int)value);
+        });
+    }
+
     private UIElement BuildUpdateCard()
     {
         var panel = new StackPanel();
         panel.Children.Add(new TextBlock { Text = localizer["Updates"], FontSize = 18, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) });
-        string state = checkingUpdate ? "UpdateChecking" : updates.ErrorKey ?? (updates.Cache.LastSuccess is null ? "UpdateNotChecked" : updates.HasUpdate ? "UpdateAvailable" : "UpdateCurrent");
+        bool busy = downloadingUpdate || updates.IsDownloading || installingUpdate;
+        bool checking = checkingUpdate || updates.IsChecking;
+        string state = installingUpdate ? "UpdateReady" : busy ? "UpdateDownloading" : updates.IsReady ? "UpdatePackageReady" : checking ? "UpdateChecking" : updates.DownloadErrorKey ?? updates.ErrorKey ?? (updates.Cache.LastSuccess is null ? "UpdateNotChecked" : updates.HasUpdate ? "UpdateAvailable" : "UpdateCurrent");
         var heading = new StackPanel { Orientation = Orientation.Horizontal };
         if (state == "UpdateCurrent") heading.Children.Add(new System.Windows.Shapes.Path
         {
             Data = Geometry.Parse("M 2 8 L 6 12 L 14 3"), Stroke = Brush("SuccessBrush"), StrokeThickness = 2,
             Width = 18, Height = 18, Margin = new Thickness(1, 2, 8, 2),
         });
-        heading.Children.Add(new TextBlock { Text = localizer[state], TextWrapping = TextWrapping.Wrap });
+        updateProgressText = new TextBlock { Text = state == "UpdateDownloading" ? localizer.Format(state, (int)(updates.IsDownloading ? updates.DownloadProgress : updateProgress)) : state == "UpdatePackageReady" ? localizer.Format(state, updates.Cache.Release!.Tag) : localizer[state], TextWrapping = TextWrapping.Wrap };
+        heading.Children.Add(updateProgressText);
         panel.Children.Add(heading);
         panel.Children.Add(new TextBlock { Text = "v" + updates.CurrentVersion + (updates.HasUpdate ? " → " + updates.Cache.Release!.Tag : ""), Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 6, 0, 8) });
         if (!installed) panel.Children.Add(new TextBlock { Text = localizer["UpdatePortable"], TextWrapping = TextWrapping.Wrap, Foreground = Brush("MutedTextBrush") });
+        if (installed) panel.Children.Add(SettingCheck(localizer["UpdateAutoDownload"], localizer["UpdateAutoDownloadHelp"], settings.AutomaticallyDownloadUpdates, value =>
+        {
+            settings.AutomaticallyDownloadUpdates = value;
+            updates.ConfigureBackgroundDownloads(installed, value);
+            if (value) _ = RefreshBackgroundUpdateAsync();
+        }));
         if (updates.HasUpdate && updates.Cache.Release is { } release)
         {
             panel.Children.Add(new TextBlock { Text = release.Published.ToLocalTime().ToString("d", CultureInfo.CurrentCulture), Foreground = Brush("MutedTextBrush") });
@@ -930,36 +957,79 @@ internal sealed class SettingsWindow : Window
             actions.Children.Add(button);
             return button;
         }
-        ActionButton("UpdateCheck", async (_, _) =>
+        ActionButton(updates.ErrorKey is null ? "UpdateCheck" : "UpdateRetry", async (_, _) =>
         {
             checkingUpdate = true; updateMessage = null; Rebuild();
-            try { await updates.CheckAsync(true, updateLifetime.Token); }
+            try { await updates.CheckAndDownloadAsync(true, updateLifetime.Token); }
             catch (OperationCanceledException) { }
             finally { checkingUpdate = false; if (!updateLifetime.IsCancellationRequested) Rebuild(); }
-        }).IsEnabled = !checkingUpdate && !downloadingUpdate;
+        }).IsEnabled = !checking && !busy;
         if (updates.HasUpdate)
         {
-            ActionButton("UpdateDownload", async (_, _) => await DownloadUpdateAsync()).IsEnabled = !downloadingUpdate && !checkingUpdate;
-            ActionButton(installed ? "UpdateRestart" : "UpdateGetInstaller", async (_, _) => await DownloadUpdateAsync(true)).IsEnabled = !downloadingUpdate && !checkingUpdate;
+            if (installed)
+            {
+                if (updates.IsReady) ActionButton("UpdateRestart", async (_, _) => await InstallReadyUpdateAsync()).IsEnabled = !busy && !checking && canInstallUpdate();
+                else ActionButton(updates.DownloadErrorKey is null ? "UpdateDownload" : "UpdateRetry", async (_, _) =>
+                {
+                    try { await updates.PrepareInstallerAsync(cancellation: updateLifetime.Token); }
+                    catch (OperationCanceledException) { }
+                }).IsEnabled = !busy && !checking;
+            }
+            else
+            {
+                ActionButton("UpdateDownload", async (_, _) => await DownloadUpdateAsync()).IsEnabled = !busy && !checking;
+                ActionButton("UpdateGetInstaller", async (_, _) => await DownloadUpdateAsync(true)).IsEnabled = !busy && !checking;
+            }
             ActionButton("UpdateLater", (_, _) => { page = SettingsPage.General; Rebuild(); });
             ActionButton("UpdateGitHub", (_, _) => OpenExternalUrl(updates.Cache.Release!.Url));
         }
         else if (!installed) ActionButton("UpdateGetInstaller", (_, _) => OpenExternalUrl(UpdateService.RepositoryUrl + "/releases/latest"));
-        if (downloadingUpdate) ActionButton("UpdateCancel", (_, _) => downloadCancellation?.Cancel());
+        if (busy) ActionButton("UpdateCancel", (_, _) => { updates.CancelBackgroundDownload(); downloadCancellation?.Cancel(); });
         panel.Children.Add(actions);
-        if (downloadingUpdate) panel.Children.Add(new ProgressBar { Minimum = 0, Maximum = 100, Value = updateProgress, Height = 6, Margin = new Thickness(0, 8, 0, 8) });
+        if (busy) panel.Children.Add(new ProgressBar { Minimum = 0, Maximum = 100, Value = updates.IsDownloading ? updates.DownloadProgress : updateProgress, Height = 6, Margin = new Thickness(0, 8, 0, 8) });
         if (updateMessage is not null) panel.Children.Add(new TextBlock { Text = localizer[updateMessage], TextWrapping = TextWrapping.Wrap, Foreground = Brush("MutedTextBrush"), Margin = new Thickness(0, 8, 0, 0) });
         return Card(panel);
     }
 
+    private async Task InstallReadyUpdateAsync()
+    {
+        if (installingUpdate) return;
+        if (!installed || !canInstallUpdate()) { updateMessage = "UpdateSwitchBusy"; Rebuild(); return; }
+        if (!ConfirmDialog.Show(this, IntPtr.Zero, localizer["Updates"], localizer["UpdateConfirm"], localizer["UpdateRestart"], localizer["UpdateLater"])) return;
+        if (!canInstallUpdate()) { updateMessage = "UpdateSwitchBusy"; Rebuild(); return; }
+        installingUpdate = true;
+        setInstallingUpdate(true);
+        bool launched = false;
+        Rebuild();
+        try
+        {
+            await updates.LaunchPreparedInstallerAsync(true, canInstallUpdate, updateLifetime.Token);
+            launched = true;
+            exitApplication();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is IOException or InvalidDataException or HttpRequestException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { updateMessage = "UpdateInstallFailed"; }
+        finally
+        {
+            if (!launched)
+            {
+                installingUpdate = false;
+                setInstallingUpdate(false);
+                if (!updateLifetime.IsCancellationRequested) Rebuild();
+            }
+        }
+    }
+
+    private async Task RefreshBackgroundUpdateAsync()
+    {
+        try { await updates.CheckAndDownloadAsync(false, updateLifetime.Token); }
+        catch (OperationCanceledException) { }
+    }
+
     private async Task DownloadUpdateAsync(bool installer = false)
     {
-        if (downloadingUpdate) return;
-        if (installer && installed)
-        {
-            if (!canInstallUpdate()) { updateMessage = "UpdateSwitchBusy"; Rebuild(); return; }
-            if (!ConfirmDialog.Show(this, IntPtr.Zero, localizer["Updates"], localizer["UpdateConfirm"], localizer["UpdateRestart"], localizer["UpdateLater"])) return;
-        }
+        if (downloadingUpdate || installed) return;
         downloadingUpdate = true; updateProgress = 0; updateMessage = null;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(updateLifetime.Token);
         downloadCancellation = cancellation;
@@ -976,14 +1046,6 @@ internal sealed class SettingsWindow : Window
             });
             temp = installer ? await updates.DownloadInstallerAsync(progress, cancellation.Token) : await updates.DownloadAsync(progress, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
-            if (installer && installed)
-            {
-                updateMessage = "UpdateReady"; Rebuild();
-                await updates.LaunchInstallerAsync(temp, canInstallUpdate, cancellation.Token);
-                temp = null; // The external installer owns its lifetime; never delete a running EXE.
-                exitApplication();
-                return;
-            }
             var dialog = new Microsoft.Win32.SaveFileDialog { FileName = installer ? UpdateService.InstallerName : UpdateService.ZipName, Filter = installer ? "Installer (*.exe)|*.exe" : "ZIP (*.zip)|*.zip", DefaultExt = installer ? ".exe" : ".zip" };
             if (dialog.ShowDialog(this) == true)
             {

@@ -58,7 +58,7 @@ internal static class Program
                 CheckPopup(temp, language);
             }
             if (args.Contains("--hover-only")) { Console.WriteLine("PASS: Hover open/leave, popup entry, profile replacement, card click isolation and dimensions, bottom placement in expanded/compact, dark/light and RU/EN."); return; }
-            Console.WriteLine("PASS: Hover/bottom popup in expanded/compact modes; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto presets/manual input; input rendering; scrollbar dark/light and RU/EN.");
+            Console.WriteLine("PASS: Update card portable/installed/ready/progress; hover/bottom popup; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto input; dark/light and RU/EN.");
         }
         finally { app.Shutdown(); Directory.Delete(temp, true); }
     }
@@ -68,7 +68,7 @@ internal static class Program
         var assembly = typeof(App).Assembly;
         var paths = new AppPaths(temp, temp);
         using var status = new ProfileStatusService(new ProfileStatusStore(paths.ProfileStatusFile), new UnavailableUsageProvider(), new SafeLogger(Path.Combine(temp, "logs")));
-        using var updates = new UpdateService(Path.Combine(temp, "update.json"));
+        using var updates = new UpdateService(Path.Combine(temp, Guid.NewGuid() + "-update.json"), new HttpClient(new UpdateFeed()), "1.1.0");
         var settings = new OverlaySettings { Theme = theme };
         var localizerType = assembly.GetType("CodexProfileOverlay.Localizer")!;
         object localizer = Activator.CreateInstance(localizerType, language)!;
@@ -83,6 +83,7 @@ internal static class Program
             p.ParameterType == typeof(Action<OverlaySettings>) ? (Action<OverlaySettings>)(_ => { }) :
             p.ParameterType == typeof(Func<string, Task>) ? (Func<string, Task>)(_ => Task.CompletedTask) :
             p.ParameterType == typeof(Func<bool>) ? (Func<bool>)(() => true) :
+            p.ParameterType == typeof(Action<bool>) ? (Action<bool>)(_ => { }) :
             (Action)(() => { })).ToArray();
         var window = (Window)ctor.Invoke(args);
         window.ShowInTaskbar = false;
@@ -112,11 +113,64 @@ internal static class Program
         Invoke(window, "OpenSupport");
         ((Action)Field(window, "dismissSupport"))();
         Check(!((Grid)Field(window, "modalHost")).IsVisible, "Support dismissal must restore settings");
+        CheckUpdateCard(window, updates, language);
         var bar = new ScrollBar { Orientation = Orientation.Vertical, Maximum = 100, ViewportSize = 20 };
         bar.Style = (Style)appResource(typeof(ScrollBar));
         bar.Measure(new Size(10, 300)); bar.Arrange(new Rect(0, 0, 10, 300)); bar.ApplyTemplate();
         Check(bar.ActualHeight == 300 && bar.Template.FindName("PART_Track", bar) is Track, "Scrollbar must fill vertical track");
         window.GetType().GetMethod("CloseForShutdown")!.Invoke(window, null);
+    }
+
+    private sealed class UpdateFeed : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+        {
+            const string tag = "v1.2.0";
+            byte[] payload = [1, 2, 3]; // Never executed.
+            string path = request.RequestUri!.AbsolutePath;
+            string text = path.EndsWith("latest") ? System.Text.Json.JsonSerializer.Serialize(new
+            {
+                tag_name = tag, html_url = UpdateService.RepositoryUrl + "/releases/tag/" + tag,
+                published_at = "2026-10-12T00:00:00Z", body = "Test release", draft = false, prerelease = false,
+                assets = new[] { UpdateService.InstallerName, "SHA256SUMS.txt" }.Select(name => new
+                { name, browser_download_url = UpdateService.RepositoryUrl + "/releases/download/" + tag + "/" + name })
+            }) : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)) + "  " + UpdateService.InstallerName;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            { Content = path.EndsWith(".exe") ? new ByteArrayContent(payload) : new StringContent(text) });
+        }
+    }
+
+    private static void CheckUpdateCard(Window window, UpdateService updates, LanguagePreference language)
+    {
+        string Text(string key) => LocalizationCatalog.Text(language, key);
+        var host = (Grid)Field(window, "contentHost");
+        void RenderCard()
+        {
+            host.Children.Clear();
+            host.Children.Add((UIElement)Invoke(window, "BuildUpdateCard")!);
+            window.UpdateLayout();
+        }
+        RenderCard();
+        Check(Descendants(host).OfType<TextBlock>().Any(t => t.Text == Text("UpdatePortable")), "Portable update explanation must be visible");
+        Check(!Descendants(host).OfType<CheckBox>().Any(), "Portable mode must not enable background downloads");
+        window.GetType().GetField("installed", Private)!.SetValue(window, true); // Isolated UI only; never change registry.
+        updates.ConfigureBackgroundDownloads(true, true);
+        updates.CheckAndDownloadAsync(false).GetAwaiter().GetResult();
+        try
+        {
+            RenderCard();
+            Check(Descendants(host).OfType<CheckBox>().Single().IsChecked == true, "Installed auto-download defaults on");
+            Check(Descendants(host).OfType<Button>().Any(b => Equals(b.Content, Text("UpdateRestart"))), "Ready package must offer confirmed installation");
+            Check(Descendants(host).OfType<TextBlock>().Any(t => t.Text.Contains("v1.2.0")), "Ready version must be visible");
+            updates.GetType().GetProperty("IsDownloading")!.SetValue(updates, true);
+            updates.GetType().GetProperty("DownloadProgress")!.SetValue(updates, 42d);
+            RenderCard();
+            Check(Descendants(host).OfType<ProgressBar>().Single().Value == 42, "Background progress must be visible");
+            Check(Descendants(host).OfType<TextBlock>().Any(t => t.Text.Contains("42%")), "Background percentage must be localized");
+            Check(Descendants(host).OfType<Button>().Any(b => Equals(b.Content, Text("UpdateCancel"))), "Background download must allow cancellation");
+            updates.GetType().GetProperty("IsDownloading")!.SetValue(updates, false);
+        }
+        finally { if (updates.ReadyInstallerPath is { } path) File.Delete(path); }
     }
 
     private static void CheckProfileManager(LanguagePreference language)

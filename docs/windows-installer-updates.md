@@ -1,6 +1,6 @@
 # Windows installer and updates
 
-The product version stays **1.0.0**, from `Directory.Build.props`. `publish.ps1`
+The product version is **1.1.0**, from `Directory.Build.props`. `publish.ps1`
 reads the published executable's product version for Inno Setup. No release,
 tag, push or external publishing is performed by the build.
 
@@ -26,8 +26,9 @@ rejects those directories as installation destinations.
 ## Update flow and trust boundary
 
 Settings → Advanced → Updates retains the current GitHub client, release notes,
-version comparison and 24-hour interval. An available release also produces a
-brief overlay notification. No GitHub token or account credentials are used.
+version comparison and 24-hour interval. The background loop wakes every 15
+minutes for download retries; metadata checks retain the 24-hour throttle.
+Startup work runs off the UI thread. No GitHub token or account credentials are used.
 
 Installed mode requires a matching HKCU uninstall InstallLocation, installation
 marker and uninstaller beside the running executable. A copied EXE is portable.
@@ -35,7 +36,22 @@ Portable mode can save the verified installer or ZIP; it never launches the
 installer or changes the portable copy. With no newer version it links to the
 official releases page for installation.
 
-“Update and restart” asks for explicit approval before downloading. Downloads
+Installed copies automatically download stable updates by default. The RU/EN
+“Automatically download updates” setting disables background transfers and
+cancels an active transfer. Downloads never start an installer. The existing
+card shows progress, retry/cancellation, and “Update vX.Y.Z is ready to install”.
+The overlay announces readiness once per version per app session.
+
+Verified installers use random `codex-update-<guid>.exe` files in the current
+user's temporary directory. The existing update cache stores only the release
+tag, constrained file name, and verified SHA-256. On restart, the service
+revalidates the cached file asynchronously, including offline. Missing or
+damaged packages are downloaded again; older packages and packages for the
+already installed version are discarded. No arbitrary cached paths are used.
+OS cleanup of temporary files is handled by downloading again.
+
+“Install and restart” asks for explicit approval only when a verified package
+is ready. Downloads
 support progress, cancellation, size/time bounds and cleanup on failure. Only
 the exact official repository/tag/installer filename and a single exact
 SHA-256 manifest entry are accepted. Stable releases only are eligible.
@@ -43,6 +59,8 @@ The file is rehashed with writes/deletion denied immediately before launch.
 A shared gate prevents overlapping downloads/installer launches; Inno's setup
 mutex prevents simultaneous installers. Active account switching is checked
 before confirmation and again immediately before launch on the UI dispatcher.
+New account operations are blocked while a confirmed installer is being
+revalidated and launched. Failed launches release this block for retry.
 
 The external installer uses fixed `/UPDATE=1 /SILENT /NORESTART` arguments.
 Inno `/SILENT` displays installation progress (not `/VERYSILENT`). It waits up

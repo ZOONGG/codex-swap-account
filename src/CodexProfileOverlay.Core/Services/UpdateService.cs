@@ -8,7 +8,8 @@ using System.Text.RegularExpressions;
 namespace CodexProfileOverlay.Core.Services;
 
 public sealed record UpdateRelease(string Tag, string Url, DateTimeOffset Published, string Notes, string? Zip, string? Checksums, string? Installer = null);
-public sealed record UpdateCache(DateTimeOffset LastAttempt, DateTimeOffset? LastSuccess, UpdateRelease? Release);
+public sealed record PreparedInstaller(string Tag, string FileName, string Sha256);
+public sealed record UpdateCache(DateTimeOffset LastAttempt, DateTimeOffset? LastSuccess, UpdateRelease? Release, PreparedInstaller? Prepared = null);
 
 /// <summary>Public release metadata only; never accesses profiles or authorization.</summary>
 public sealed class UpdateService : IDisposable
@@ -20,12 +21,24 @@ public sealed class UpdateService : IDisposable
     private readonly string cachePath;
     private readonly Func<DateTimeOffset> now;
     private readonly SemaphoreSlim checkGate = new(1, 1), downloadGate = new(1, 1);
+    private readonly SemaphoreSlim prepareGate = new(1, 1);
+    private readonly object backgroundLock = new();
+    private readonly object cacheWriteLock = new();
+    private CancellationTokenSource? backgroundDownload;
+    private volatile bool installed, automaticallyDownload;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> verifiedInstallers = new();
     public string CurrentVersion { get; }
     public UpdateCache Cache { get; private set; } = new(default, null, null);
     public string? ErrorKey { get; private set; }
+    public string? DownloadErrorKey { get; private set; }
+    public bool IsChecking { get; private set; }
+    public bool IsDownloading { get; private set; }
+    public double DownloadProgress { get; private set; }
+    public string? ReadyInstallerPath { get; private set; }
+    public bool IsReady => ReadyInstallerPath is not null && HasUpdate && Cache.Prepared?.Tag == Cache.Release?.Tag;
     public bool HasUpdate => Cache.Release is { } r && ReleaseVersion.Parse(r.Tag).CompareTo(ReleaseVersion.Parse(CurrentVersion)) > 0;
     public event Action? Changed;
+    public event Action<double>? ProgressChanged;
 
     public UpdateService(string cachePath, HttpClient? client = null, string? currentVersion = null, Func<DateTimeOffset>? clock = null)
     {
@@ -50,8 +63,13 @@ public sealed class UpdateService : IDisposable
         try
         {
             if (!manual && now() - Cache.LastAttempt < TimeSpan.FromHours(24)) return;
-            Cache = Cache with { LastAttempt = now() };
-            SaveCache();
+            IsChecking = true;
+            Changed?.Invoke();
+            lock (cacheWriteLock)
+            {
+                Cache = Cache with { LastAttempt = now() };
+                SaveCache();
+            }
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(TimeSpan.FromSeconds(20));
             byte[] data = await ReadAsync(new Uri("https://api.github.com/repos/ZOONGG/codex-swap-account/releases/latest"), 1024 * 1024, timeout.Token).ConfigureAwait(false);
@@ -63,14 +81,164 @@ public sealed class UpdateService : IDisposable
             string? Asset(string name) => root.GetProperty("assets").EnumerateArray().FirstOrDefault(x => x.GetProperty("name").GetString() == name) is var asset && asset.ValueKind == JsonValueKind.Object ? asset.GetProperty("browser_download_url").GetString() : null;
             var release = new UpdateRelease(tag, root.GetProperty("html_url").GetString()!, root.GetProperty("published_at").GetDateTimeOffset(), root.GetProperty("body").GetString() ?? "", Asset(ZipName), Asset("SHA256SUMS.txt"), Asset(InstallerName));
             if (!ValidRelease(release)) throw new FormatException();
-            Cache = Cache with { LastSuccess = now(), Release = release };
+            lock (cacheWriteLock)
+            {
+                Cache = Cache with { LastSuccess = now(), Release = release };
+                SaveCache();
+            }
             ErrorKey = null;
-            SaveCache();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
         catch (HttpRequestException e) { ErrorKey = e.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests ? "UpdateRateLimited" : "UpdateUnavailable"; }
         catch (Exception e) when (e is OperationCanceledException or JsonException or FormatException or InvalidOperationException or KeyNotFoundException or IOException or InvalidDataException) { ErrorKey = "UpdateUnavailable"; }
-        finally { checkGate.Release(); Changed?.Invoke(); }
+        finally { IsChecking = false; checkGate.Release(); Changed?.Invoke(); }
+    }
+
+    public void ConfigureBackgroundDownloads(bool isInstalled, bool enabled)
+    {
+        lock (backgroundLock)
+        {
+            installed = isInstalled;
+            automaticallyDownload = enabled;
+            if (!installed || !enabled) backgroundDownload?.Cancel();
+        }
+    }
+
+    public void CancelBackgroundDownload()
+    {
+        lock (backgroundLock) backgroundDownload?.Cancel();
+    }
+
+    /// <summary>The checker retains its 24-hour throttle; cached downloads can retry separately.</summary>
+    public async Task CheckAndDownloadAsync(bool manual, CancellationToken cancellation = default)
+    {
+        await CheckAsync(manual, cancellation).ConfigureAwait(false);
+        bool shouldDownload;
+        lock (backgroundLock) shouldDownload = installed && automaticallyDownload;
+        if (!installed) return;
+        try { await PrepareInstallerAsync(shouldDownload, cancellation, automatic: true).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { }
+    }
+
+    // A single orchestration gate uses the existing downloader and its shared transfer gate.
+    public async Task PrepareInstallerAsync(bool allowDownload = true, CancellationToken cancellation = default, bool automatic = false)
+    {
+        if (!installed) throw new InvalidOperationException("Portable mode cannot prepare automatic installation.");
+        if (!await prepareGate.WaitAsync(0, cancellation).ConfigureAwait(false)) return;
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        string? downloaded = null;
+        try
+        {
+            lock (backgroundLock)
+            {
+                backgroundDownload = lifetime;
+                if (!installed || automatic && !automaticallyDownload) allowDownload = false;
+            }
+            DownloadErrorKey = null;
+            var release = Cache.Release;
+            if (!HasUpdate || Cache.Prepared is { } old && old.Tag != release?.Tag) DiscardPreparedInstaller();
+            if (!HasUpdate || release is null) return;
+            if (Cache.Prepared is { } prepared)
+            {
+                string? path = PreparedPath(prepared);
+                if (path is not null && await VerifyPreparedAsync(path, prepared, lifetime.Token).ConfigureAwait(false))
+                {
+                    ReadyInstallerPath = path;
+                    verifiedInstallers[path] = Convert.FromHexString(prepared.Sha256);
+                    return;
+                }
+                DiscardPreparedInstaller();
+            }
+            if (!allowDownload) return;
+            IsDownloading = true;
+            DownloadProgress = 0;
+            Changed?.Invoke();
+            downloaded = await DownloadInstallerAsync(new InlineProgress(value =>
+            {
+                int previous = (int)DownloadProgress;
+                DownloadProgress = Math.Clamp(value, 0, 100);
+                if ((int)DownloadProgress != previous) ProgressChanged?.Invoke(DownloadProgress);
+            }), lifetime.Token).ConfigureAwait(false);
+            lock (cacheWriteLock)
+            {
+                if (release != Cache.Release || !HasUpdate) throw new InvalidDataException("Release changed during download.");
+                Cache = Cache with { Prepared = new PreparedInstaller(release.Tag, Path.GetFileName(downloaded), Convert.ToHexString(verifiedInstallers[downloaded])) };
+                if (!SaveCache()) throw new IOException("Cannot retain the verified installer metadata.");
+            }
+            ReadyInstallerPath = downloaded;
+            downloaded = null;
+        }
+        catch (OperationCanceledException)
+        {
+            DownloadErrorKey = "UpdateCancelled";
+            throw;
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or HttpRequestException or InvalidOperationException)
+        {
+            DownloadErrorKey = "UpdateDownloadFailed";
+        }
+        finally
+        {
+            if (downloaded is not null) DeleteOwnedInstaller(downloaded);
+            lock (backgroundLock) backgroundDownload = null;
+            IsDownloading = false;
+            prepareGate.Release();
+            Changed?.Invoke();
+        }
+    }
+
+    private sealed class InlineProgress(Action<double> report) : IProgress<double>
+    {
+        public void Report(double value) => report(value);
+    }
+
+    private static string? PreparedPath(PreparedInstaller prepared)
+        => prepared.FileName is not null && Regex.IsMatch(prepared.FileName, @"\Acodex-update-[a-f0-9]{32}\.exe\z")
+            && prepared.Sha256 is not null && Regex.IsMatch(prepared.Sha256, @"\A[a-fA-F0-9]{64}\z")
+            ? Path.Combine(Path.GetTempPath(), prepared.FileName) : null;
+
+    private static async Task<bool> VerifyPreparedAsync(string path, PreparedInstaller prepared, CancellationToken cancellation)
+    {
+        try
+        {
+            if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return false;
+            await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            if (input.Length > 512L * 1024 * 1024) return false;
+            return CryptographicOperations.FixedTimeEquals(await SHA256.HashDataAsync(input, cancellation).ConfigureAwait(false), Convert.FromHexString(prepared.Sha256));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    private void DeleteOwnedInstaller(string path)
+    {
+        verifiedInstallers.TryRemove(path, out _);
+        try { File.Delete(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    private void DiscardPreparedInstaller()
+    {
+        if (Cache.Prepared is { } prepared && PreparedPath(prepared) is { } path) DeleteOwnedInstaller(path);
+        ReadyInstallerPath = null;
+        lock (cacheWriteLock)
+        {
+            Cache = Cache with { Prepared = null };
+            SaveCache();
+        }
+    }
+
+    public async Task LaunchPreparedInstallerAsync(bool confirmed, Func<bool> mayInstall, CancellationToken cancellation = default)
+    {
+        if (!confirmed || !installed || !mayInstall()) throw new InvalidOperationException("Installation requires confirmation and an idle installed application.");
+        if (!IsReady) throw new InvalidDataException("No verified installer is ready.");
+        string path = ReadyInstallerPath!;
+        try { await LaunchInstallerAsync(path, () => IsReady && ReadyInstallerPath == path && mayInstall(), cancellation).ConfigureAwait(false); }
+        catch (InvalidDataException) { DiscardPreparedInstaller(); DownloadErrorKey = "UpdateDownloadFailed"; Changed?.Invoke(); throw; }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException or OperationCanceledException or System.ComponentModel.Win32Exception)
+        {
+            if (IsReady && Cache.Prepared is { } prepared) verifiedInstallers[path] = Convert.FromHexString(prepared.Sha256);
+            throw;
+        }
     }
 
     private static bool ValidRelease(UpdateRelease r)
@@ -119,7 +287,12 @@ public sealed class UpdateService : IDisposable
             if (installer) verifiedInstallers[temp] = actual;
             return temp;
         }
-        catch { if (File.Exists(temp)) File.Delete(temp); throw; }
+        catch
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
         finally { downloadGate.Release(); }
     }
 
@@ -183,15 +356,23 @@ public sealed class UpdateService : IDisposable
         throw new InvalidDataException("Too many redirects.");
     }
 
-    private void SaveCache()
+    private bool SaveCache()
     {
-        try
+        lock (cacheWriteLock)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(cachePath))!);
-            File.WriteAllText(cachePath + ".tmp", JsonSerializer.Serialize(Cache));
-            File.Move(cachePath + ".tmp", cachePath, true);
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(cachePath))!);
+                File.WriteAllText(cachePath + ".tmp", JsonSerializer.Serialize(Cache));
+                File.Move(cachePath + ".tmp", cachePath, true);
+                return true;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
-    public void Dispose() => http.Dispose();
+    public void Dispose()
+    {
+        CancelBackgroundDownload();
+        http.Dispose();
+    }
 }

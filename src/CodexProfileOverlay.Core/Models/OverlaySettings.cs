@@ -2,6 +2,8 @@ namespace CodexProfileOverlay.Core.Models;
 
 public sealed class OverlaySettings
 {
+    public bool AutomaticallyDownloadUpdates { get; set; } = true;
+
     public OverlayDisplayMode DisplayMode { get; set; } = OverlayDisplayMode.Auto;
 
     public PositionPreset PositionPreset { get; set; } = PositionPreset.AfterMenu;

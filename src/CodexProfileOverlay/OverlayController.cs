@@ -24,6 +24,7 @@ internal sealed class OverlayController : IDisposable
     private readonly OverlayVisibilityState visibilityState = new();
     private readonly CancellationTokenSource disposalTokenSource = new();
     private bool accountOperation;
+    private bool installingUpdate;
     private readonly Dictionary<string, DateTimeOffset> accountVerifiedAt = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, AccountAvailability> accountStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> lastUsageRefreshAttempts = new(StringComparer.OrdinalIgnoreCase);
@@ -36,6 +37,8 @@ internal sealed class OverlayController : IDisposable
     private OverlayWindow? overlayWindow;
     private SettingsWindow? settingsWindow;
     private readonly UpdateService updates = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexProfileOverlay", "updates.json"));
+    private readonly bool installed;
+    private string? notifiedUpdateTag;
     private ProfileManagerWindow? profileManagerWindow;
     private HotkeyManager? hotkeyManager;
     private IReadOnlyList<ProfileInfo> profiles = [];
@@ -64,6 +67,9 @@ internal sealed class OverlayController : IDisposable
         this.logger = logger;
         this.backupMaintenance = backupMaintenance;
         settings = settingsService.Load();
+        using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(InstallationMode.UninstallKey))
+            installed = InstallationMode.IsInstalled(Environment.ProcessPath!, key?.GetValue("InstallLocation") as string);
+        updates.Changed += UpdateStateChanged;
         App.ApplyTheme(settings.Theme);
         localizer = new Localizer(settings.Language);
         visibilityState.AutomaticDisplayEnabled = settings.ShowAutomaticallyWhenCodexOpens;
@@ -94,16 +100,31 @@ internal sealed class OverlayController : IDisposable
         }
 
         Tick();
-        _ = CheckForUpdatesAtStartupAsync();
+        var updateCancellation = disposalTokenSource.Token;
+        _ = Task.Run(() => CheckForUpdatesAtStartupAsync(updateCancellation));
         if (afterInstallation) overlayWindow?.ShowNotification(localizer.Format("UpdateInstalledVersion", updates.CurrentVersion));
     }
 
-    private async Task CheckForUpdatesAtStartupAsync()
+    private async Task CheckForUpdatesAtStartupAsync(CancellationToken cancellation)
     {
-        try { await updates.CheckAsync(false, disposalTokenSource.Token); }
+        try
+        {
+            using var interval = new PeriodicTimer(TimeSpan.FromMinutes(15));
+            do { await updates.CheckAndDownloadAsync(false, cancellation); }
+            while (await interval.WaitForNextTickAsync(cancellation));
+        }
         catch (OperationCanceledException) { }
-        if (updates.HasUpdate && !disposalTokenSource.IsCancellationRequested)
-            overlayWindow?.ShowNotification(localizer["UpdateAvailable"]);
+    }
+
+    private void UpdateStateChanged()
+    {
+        if (disposalTokenSource.IsCancellationRequested) return;
+        _ = Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            if (disposalTokenSource.IsCancellationRequested || !updates.IsReady || updates.Cache.Release?.Tag == notifiedUpdateTag) return;
+            notifiedUpdateTag = updates.Cache.Release!.Tag;
+            overlayWindow?.ShowNotification(localizer.Format("UpdatePackageReady", notifiedUpdateTag));
+        });
     }
 
     public void Dispose()
@@ -111,6 +132,7 @@ internal sealed class OverlayController : IDisposable
         disposalTokenSource.Cancel();
         timer.Stop();
         statusService.Dispose();
+        updates.Changed -= UpdateStateChanged;
         updates.Dispose();
         hotkeyManager?.Dispose();
         trayIcon?.Dispose();
@@ -316,7 +338,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task SwitchProfileAsync(string profileName)
     {
-        if (switching || accountOperation || string.Equals(profileName, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
+        if (installingUpdate || switching || accountOperation || string.Equals(profileName, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -412,7 +434,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task AddProfileAsync()
     {
-        if (switching || accountOperation) return;
+        if (installingUpdate || switching || accountOperation) return;
         EnsureOverlay();
         string? name = ShowPrompt(PromptOwner(), localizer["AddProfileTitle"], localizer["ProfileDirectoryName"],
             primaryText: localizer["BrowserLogin"]);
@@ -429,7 +451,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task LoginAccountAsync(string name, bool reauthorize)
     {
-        if (switching || accountOperation || automaticUsageRefreshRunning)
+        if (installingUpdate || switching || accountOperation || automaticUsageRefreshRunning)
         {
             overlayWindow?.ShowNotification(localizer["AccountBusy"]);
             return;
@@ -513,7 +535,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task CheckAccountAsync(ProfileInfo profile)
     {
-        if (switching || accountOperation || automaticUsageRefreshRunning)
+        if (installingUpdate || switching || accountOperation || automaticUsageRefreshRunning)
         {
             overlayWindow?.ShowNotification(localizer["AccountBusy"]);
             return;
@@ -560,7 +582,8 @@ internal sealed class OverlayController : IDisposable
             ResetPosition,
             ResetSettings,
             () => Application.Current.Shutdown(),
-            () => !switching && !accountOperation);
+            () => !switching && !accountOperation,
+            value => installingUpdate = value);
         settingsWindow.Closed += (_, _) => settingsWindow = null;
         ShowCodexOwnedWindow(settingsWindow);
         settingsWindow.SetConflicts(RegisterHotkeys());
@@ -606,7 +629,7 @@ internal sealed class OverlayController : IDisposable
 
     private void RenameDirectory(ProfileInfo profile)
     {
-        if (accountOperation) return;
+        if (installingUpdate || accountOperation) return;
         if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
         {
             overlayWindow?.ShowError(localizer["ActiveProfileCannotRemove"]);
@@ -626,7 +649,7 @@ internal sealed class OverlayController : IDisposable
 
     private void RemoveProfile(ProfileInfo profile)
     {
-        if (accountOperation) return;
+        if (installingUpdate || accountOperation) return;
         if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
         {
             overlayWindow?.ShowError(localizer["ActiveProfileCannotRename"]);
@@ -733,6 +756,7 @@ internal sealed class OverlayController : IDisposable
 
     private void ApplySettings()
     {
+        updates.ConfigureBackgroundDownloads(installed, settings.AutomaticallyDownloadUpdates);
         ApplyStartupSetting();
         App.ApplyTheme(settings.Theme);
         overlayWindow?.ApplySettings();
@@ -792,7 +816,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task RefreshUsageForProfileAsync(string profileName)
     {
-        if (switching || accountOperation || statusService.ProviderCapability != UsageProviderCapability.Supported)
+        if (installingUpdate || switching || accountOperation || statusService.ProviderCapability != UsageProviderCapability.Supported)
         {
             return;
         }
@@ -812,7 +836,7 @@ internal sealed class OverlayController : IDisposable
     private void BeginAutomaticUsageRefreshIfDue()
     {
         if (automaticUsageRefreshRunning
-            || switching || accountOperation
+            || installingUpdate || switching || accountOperation
             || profiles.Count == 0
             || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
         {
@@ -862,7 +886,7 @@ internal sealed class OverlayController : IDisposable
             foreach (ProfileInfo profile in dueProfiles)
             {
                 if (disposalTokenSource.IsCancellationRequested
-                    || switching || accountOperation
+                    || installingUpdate || switching || accountOperation
                     || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
                 {
                     return;

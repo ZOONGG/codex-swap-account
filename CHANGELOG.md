@@ -3,7 +3,7 @@
 ## 1.1.0 - 2026-10-12
 
 ### Added
-- One-click Windows updates with verified downloads and a per-user Windows installer.
+- Automatic background downloads of verified Windows updates, with installation and restart only after confirmation, and a per-user Windows installer.
 - Official browser login and account reauthorization with cancellation and timeout handling.
 - Detailed cached 5-hour and weekly account limits on hover and optional tray indicators.
 
