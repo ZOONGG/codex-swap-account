@@ -3,6 +3,8 @@
 AppId=CodexSwapAccount
 AppName=Codex Swap Account
 AppVersion={#ProductVersion}
+VersionInfoVersion={#ProductVersion}
+VersionInfoProductVersion={#ProductVersion}
 AppPublisher=ZOONGG
 DefaultDirName={localappdata}\Programs\CodexSwapAccount
 DisableDirPage=yes
