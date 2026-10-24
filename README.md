@@ -18,7 +18,7 @@ Switch between multiple Codex accounts from an overlay attached directly to the 
 [Request a feature](https://github.com/ZOONGG/codex-swap-account/issues/new?template=feature_request.md)
 
 <p align="center">
-  <strong>English</strong> ·   <a href="README_RU.md">Русский</a>
+  <strong>English</strong> ·   <a href="README_RU.md">Русский</a> ·   <a href="README_ZH.md">简体中文</a>
 </p>
 
 </div>
@@ -57,7 +57,7 @@ The app runs quietly in the system tray and only shows the overlay when a verifi
 | **Multi-monitor ready** | The overlay follows Codex across monitors, window moves, resizes, and DPI changes. |
 | **Local only** | No telemetry, no cloud sync, no reverse proxy, and no credential upload. |
 | **Tray companion** | Launch Codex, show/hide the overlay, manage profiles, and change settings from the tray. |
-| **Bilingual UI** | English and Russian interface support. |
+| **Trilingual UI** | English, Russian, and Simplified Chinese interface support. |
 | **No admin rights** | Runs per-user and does not require a Windows service. |
 | **Open source** | Built with C#, .NET 8, WPF, and a security-focused repository workflow. |
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Simplified Chinese interface localization, selectable in Settings → Language and used automatically on Chinese Windows.
+- `README_ZH.md` with a full Simplified Chinese project guide.
+
+### Changed
+- The Support window, usage countdowns, refresh errors, and the support button labels now follow the selected language instead of an English/Russian toggle.
+
 ## 1.1.0 - 2026-10-12
 
 ### Added

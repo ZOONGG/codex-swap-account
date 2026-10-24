@@ -117,6 +117,9 @@ public static class LocalizationCatalog
         ["SystemDefault"] = "System default",
         ["English"] = "English",
         ["Russian"] = "Русский",
+        ["Chinese"] = "简体中文",
+        ["Support"] = "Support",
+        ["SupportDevelopment"] = "Support the development of Codex Swap Account",
         ["DirectoryName"] = "Directory name",
         ["OpenProfilesFolder"] = "Open profiles folder",
         ["OpenRemovedProfilesFolder"] = "Open removed profiles folder",
@@ -355,6 +358,9 @@ public static class LocalizationCatalog
         ["SystemDefault"] = "Как в системе",
         ["English"] = "English",
         ["Russian"] = "Русский",
+        ["Chinese"] = "简体中文",
+        ["Support"] = "Поддержать",
+        ["SupportDevelopment"] = "Поддержать развитие Codex Swap Account",
         ["DirectoryName"] = "Имя папки",
         ["OpenProfilesFolder"] = "Открыть папку профилей",
         ["OpenRemovedProfilesFolder"] = "Открыть удалённые профили",
@@ -481,6 +487,247 @@ public static class LocalizationCatalog
 
     };
 
+    private static readonly IReadOnlyDictionary<string, string> Chinese = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["FiveHourLimit"] = "5 小时额度",
+        ["WeeklyLimit"] = "每周额度",
+        ["UsageDetails"] = "账户额度",
+        ["UsageRemaining"] = "剩余",
+        ["UsageLoading"] = "刷新中…",
+        ["TrayUsage"] = "托盘额度显示",
+        ["TrayUsageHelp"] = "显示当前账户的剩余额度；过期数据会被隐藏。",
+        ["DefaultIcon"] = "应用图标",
+        ["FiveHourRemaining"] = "5 小时剩余",
+        ["WeeklyRemaining"] = "每周剩余",
+
+        ["BrowserLogin"] = "通过浏览器登录",
+        ["AccountBusy"] = "请等待当前账户操作或额度检查结束后重试。",
+        ["AccountStatusHelp"] = "“可用”表示 15 分钟内成功登录过。仅有已保存的凭证无法证明授权有效。状态检查不会强制刷新令牌。",
+        ["Reauthorize"] = "重新授权",
+        ["Reauthorized"] = "账户授权已更新",
+        ["CheckAccount"] = "检查账户状态",
+        ["AccountAvailable"] = "可用",
+        ["AccountSignInRequired"] = "需要登录",
+        ["AccountUnknown"] = "未知",
+        ["LoginWaiting"] = "请在浏览器中完成登录后回到此处。你随时可以取消，登录将在 10 分钟后超时。",
+        ["LoginRuntimeMissing"] = "未找到官方 Codex 登录组件，或该组件无法启动。请安装或更新适用于 Windows 的官方 Codex 桌面应用，打开一次后在此重试。无需使用终端，也无需手动修改 auth.json。",
+        ["LoginFailed"] = "登录未完成。现有账户未发生变化。请重新通过浏览器登录。",
+        ["ReauthorizeActiveConfirm"] = "登录成功。请先保存 Codex 中的工作。是否安全关闭 Codex 并应用新的授权？取消将保留原有授权。",
+        ["LoginRelaunchFailed"] = "授权已保存，但无法重新打开 Codex。请手动启动 Codex 桌面应用。",
+        ["Updates"] = "应用更新",
+        ["UpdateRestart"] = "安装并重启",
+        ["UpdateAutoDownload"] = "自动下载更新",
+        ["UpdateAutoDownloadHelp"] = "在后台下载已验证的安装包。安装始终需要你确认。",
+        ["UpdateDownloading"] = "下载中 — {0}%",
+        ["UpdatePackageReady"] = "更新 {0} 已可安装",
+        ["UpdateRetry"] = "重试",
+        ["UpdateGetInstaller"] = "安装 Codex Swap Account",
+        ["UpdateLater"] = "稍后",
+        ["UpdatePortable"] = "便携模式。请保存并运行安装程序以启用应用内安装。当前副本不会被修改。",
+        ["UpdateConfirm"] = "安装已验证的更新并重启 Codex Swap Account？账户和设置将被保留。Codex 桌面版和 ChatGPT 桌面版会保持打开。",
+        ["UpdateSwitchBusy"] = "正在切换账户。请等待完成后再重试。",
+        ["UpdateReady"] = "验证通过，正在启动安装程序…",
+        ["UpdateInstallerSaved"] = "已验证的安装包已保存。运行它以安装 Codex Swap Account。",
+        ["UpdateInstallFailed"] = "更新失败。切换器仍可使用。请重试，或从 GitHub 下载官方安装包。如果关闭后安装失败，请重新打开现有应用或再次运行安装程序。",
+        ["UpdateInstalledVersion"] = "已安装版本：{0}",
+
+        ["UpdateCheck"] = "检查更新",
+        ["UpdateDownload"] = "下载更新",
+        ["UpdateGitHub"] = "在 GitHub 上查看",
+        ["UpdateCancel"] = "取消",
+        ["UpdateCurrent"] = "已是最新版本",
+        ["UpdateAvailable"] = "有可用更新",
+        ["UpdateNotChecked"] = "检查是否有新版本",
+        ["UpdateChecking"] = "正在检查更新…",
+        ["UpdateUnavailable"] = "更新服务不可用。请检查网络连接后重试。",
+        ["UpdateRateLimited"] = "已达 GitHub 请求上限。请稍后重试。",
+        ["UpdateSaved"] = "已验证的 ZIP 已保存。需要手动安装。",
+        ["UpdateCancelled"] = "下载已取消。",
+        ["UpdateDownloadFailed"] = "下载失败。需要官方发布文件和匹配的 SHA-256 校验值。",
+
+        ["OpenCodex"] = "打开 Codex",
+        ["ShowSwitcher"] = "显示切换器",
+        ["HideSwitcher"] = "隐藏切换器",
+        ["Profiles"] = "账户配置",
+        ["Settings"] = "设置",
+        ["StartWithWindows"] = "随 Windows 启动",
+        ["Exit"] = "退出",
+        ["Active"] = "当前",
+        ["AddProfile"] = "添加配置",
+        ["ManageProfiles"] = "管理配置",
+        ["Rename"] = "重命名",
+        ["OpenFolder"] = "打开文件夹",
+        ["Remove"] = "移除",
+        ["SwitchingToProfile"] = "正在切换到 {0}...",
+        ["SwitchedToAccount"] = "已切换到账户：{0}",
+        ["PreviousAuthorizationRestored"] = "已恢复先前的授权",
+        ["General"] = "常规",
+        ["Appearance"] = "外观",
+        ["Hotkeys"] = "快捷键",
+        ["Language"] = "语言",
+        ["ThemeLight"] = "浅色主题",
+        ["ThemeDark"] = "深色主题",
+        ["SwitchToLightTheme"] = "切换到浅色主题",
+        ["SwitchToDarkTheme"] = "切换到深色主题",
+        ["Advanced"] = "高级",
+        ["Close"] = "关闭",
+        ["Refresh"] = "刷新",
+        ["Done"] = "完成",
+        ["NoReadyProfiles"] = "没有可用的配置",
+        ["ToggleSwitcher"] = "切换显示状态",
+        ["RestoreDefaults"] = "恢复默认",
+        ["ResetHotkeys"] = "重置快捷键",
+        ["PressShortcut"] = "请按下快捷键...",
+        ["None"] = "无",
+        ["Applied"] = "已应用",
+        ["DisplayMode"] = "显示模式",
+        ["PositionPreset"] = "位置预设",
+        ["OffsetX"] = "X 偏移",
+        ["OffsetY"] = "Y 偏移",
+        ["UiScale"] = "界面缩放",
+        ["Animations"] = "动画",
+        ["ShowAutomatically"] = "Codex 打开时自动显示",
+        ["LaunchOnStart"] = "启动面板时同时启动 Codex",
+        ["LaunchAfterSwitch"] = "切换后启动 Codex",
+        ["GracefulTimeout"] = "正常关闭超时",
+        ["ForceCloseFallback"] = "强制关闭兜底",
+        ["ConfirmForceClose"] = "确认账户切换",
+        ["ConfirmSwitchTitle"] = "切换账户？",
+        ["ConfirmSwitchPrompt"] = "Codex 将被关闭并切换到配置“{0}”。只有在你确认后账户才会更改。",
+        ["ConfirmSwitchPrimary"] = "切换账户",
+        ["CodexCouldNotLaunch"] = "无法自动打开 Codex。",
+        ["SystemDefault"] = "跟随系统",
+        ["English"] = "English",
+        ["Russian"] = "Русский",
+        ["Chinese"] = "简体中文",
+        ["Support"] = "支持",
+        ["SupportDevelopment"] = "支持 Codex Swap Account 的开发",
+        ["DirectoryName"] = "文件夹名称",
+        ["OpenProfilesFolder"] = "打开配置文件夹",
+        ["OpenRemovedProfilesFolder"] = "打开已移除配置文件夹",
+        ["OpenApplicationData"] = "打开应用数据",
+        ["OpenBackups"] = "打开备份",
+        ["BackupStorageSummary"] = "当前备份占用：{0}\n已保留的已完成备份：{1}\n保留上限：{2} 个备份 / {3}，7 天",
+        ["CleanLegacyBackups"] = "清理旧版备份",
+        ["CleanCompletedBackups"] = "清理所有已完成备份",
+        ["LegacyBackupCleanupPrompt"] = "旧版备份目录：{0}\n总大小：{1}\n最早：{2}\n最新：{3}\n预计可释放：{4}\n\n将保留最新的两个旧版备份。",
+        ["CompletedBackupCleanupPrompt"] = "删除所有已完成的回滚备份？进行中的事务将被保留。",
+        ["NoLegacyBackups"] = "未找到旧版备份。",
+        ["BackupCleanupCompleted"] = "备份清理完成。",
+        ["Clean"] = "清理",
+        ["OpenLogs"] = "打开日志",
+        ["ResetPosition"] = "重置位置",
+        ["ResetSettings"] = "重置设置",
+        ["ExitApplication"] = "退出应用",
+        ["CouldNotRefreshProfiles"] = "无法刷新配置。请检查配置文件夹。",
+        ["HotkeysCouldNotRegister"] = "一个或多个快捷键注册失败。",
+        ["ForceClosePrompt"] = "将请求 Codex 正常关闭。如果超时后仍在运行，是否允许强制关闭 Codex 以完成切换？",
+        ["CouldNotSwitch"] = "账户切换失败。",
+        ["InvalidProfileName"] = "请输入有效的配置名称，不能使用保留名称或非法文件名字符。",
+        ["DuplicateProfileName"] = "已存在同名配置。请换一个名称。",
+        ["AddProfileTitle"] = "添加配置",
+        ["ProfileDirectoryName"] = "配置文件夹名称",
+        ["StartingLogin"] = "正在为 {0} 启动 Codex 登录...",
+        ["AuthNotCreated"] = "登录已结束，但没有生成 auth.json。",
+        ["ProfileAdded"] = "配置添加成功",
+        ["SwitchNewProfile"] = "是否立即切换到新添加的配置？",
+        ["CouldNotAddProfile"] = "添加配置失败。",
+        ["RenameDisplayName"] = "重命名显示名称",
+        ["DisplayName"] = "显示名称",
+        ["ProfileRenamed"] = "配置已重命名",
+        ["ActiveProfileCannotRename"] = "当前配置文件夹无法重命名。",
+        ["ActiveProfileCannotRemove"] = "当前配置无法移除。",
+        ["RemoveProfilePrompt"] = "这会把本地保存的登录信息移动到已移除配置文件夹。它不会删除你的 ChatGPT 账户。",
+        ["ProfileRemoved"] = "配置已从切换器移除",
+        ["StartupCouldNotUpdate"] = "无法更新“随 Windows 启动”。",
+        ["Add"] = "添加",
+        ["Save"] = "保存",
+        ["Cancel"] = "取消",
+        ["DisplayModeHelp"] = "“自动”会在 Codex 窗口较窄时使用紧凑模式。",
+        ["PositionPresetHelp"] = "“跟随菜单”会把切换器放在原生菜单行右侧。",
+        ["OffsetXHelp"] = "可水平拖动，或直接输入数值。",
+        ["OffsetYHelp"] = "可垂直拖动，或直接输入数值。",
+        ["UiScaleHelp"] = "缩放面板，不影响 Codex。",
+        ["AnimationsHelp"] = "启用短暂的悬停与通知过渡动画。",
+        ["StartWithWindowsHelp"] = "将发布的可执行文件注册到 Windows 登录启动项。",
+        ["ShowAutomaticallyHelp"] = "控制检测到 Codex 窗口时是否自动显示。",
+        ["LaunchOnStartHelp"] = "本托盘应用启动时同时启动 Codex。",
+        ["LaunchAfterSwitchHelp"] = "账户切换完成后重新打开 Codex。",
+        ["LanguageHelp"] = "“跟随系统”会使用 Windows 显示语言。",
+        ["GracefulTimeoutHelp"] = "等待多少秒后再执行可选的强制关闭兜底。",
+        ["ForceCloseFallbackHelp"] = "当 Codex 未能正常关闭时仍允许完成切换。",
+        ["ConfirmForceCloseHelp"] = "在关闭 Codex 并更改当前账户之前询问确认。",
+        ["HotkeyHelp"] = "点击输入框后按下快捷键。Escape 取消，Backspace 清除。",
+        ["UseModifier"] = "至少使用一个修饰键。",
+        ["InvalidNumber"] = "数字无效。",
+        ["CouldNotSaveSettings"] = "无法保存设置。",
+        ["ExportSettings"] = "导出设置",
+        ["ImportSettings"] = "导入设置",
+        ["ProfileHotkey"] = "配置 {0}：{1}",
+        ["Switching"] = "切换中...",
+        ["AfterMenu"] = "跟随菜单",
+        ["TopCenter"] = "顶部居中",
+        ["TopRight"] = "右上角",
+        ["TopLeft"] = "左上角",
+        ["Custom"] = "自定义",
+        ["Auto"] = "自动",
+        ["Compact"] = "紧凑",
+        ["Expanded"] = "展开",
+
+        // Status and limits localization
+        ["StatusAndLimits"] = "状态与额度",
+        ["ShowAutomaticLimitIndicators"] = "自动额度指示",
+        ["ShowAutomaticLimitIndicatorsHelp"] = "检查可用的 Codex 额度，并在每个配置旁显示一个状态表情。",
+        ["ShowIndicatorsInOverlay"] = "在面板中显示指示",
+        ["ShowIndicatorsInOverlayHelp"] = "在面板的配置按钮和紧凑列表中显示额度指示。",
+        ["GreenThreshold"] = "绿色阈值 (%)",
+        ["GreenThresholdHelp"] = "达到或高于该百分比时显示绿色。",
+        ["YellowThreshold"] = "黄色阈值 (%)",
+        ["YellowThresholdHelp"] = "从该百分比开始显示黄色；更低的值显示为红色。",
+        ["StaleDataThreshold"] = "过期数据阈值（分钟）",
+        ["StaleDataThresholdHelp"] = "数据多少分钟未更新后被视为过期。",
+        ["LowWarningThreshold"] = "低额度提醒阈值 (%)",
+        ["LowWarningThresholdHelp"] = "低额度提醒的百分比阈值。",
+        ["ActiveProfileRefreshInterval"] = "当前配置刷新间隔（分钟）",
+        ["ActiveProfileRefreshIntervalHelp"] = "当前配置自动刷新的间隔分钟数。",
+        ["InactiveProfileRefreshInterval"] = "非当前配置刷新间隔（分钟）",
+        ["InactiveProfileRefreshIntervalHelp"] = "非当前配置自动刷新的间隔分钟数。",
+        ["WarnNearlyExhausted"] = "额度即将耗尽时提醒",
+        ["WarnNearlyExhaustedHelp"] = "当受支持的数据源报告额度不足时，显示一条去重的本地通知。",
+        ["AutomaticLimitsUnavailable"] = "自动额度不可用",
+        ["AutomaticLimitsUnavailableHelp"] = "自动检查需要支持 app-server 额度接口的 Codex CLI。启用后台检查前请先运行支持性测试。",
+        ["IndicatorLegend"] = "指示说明",
+        ["AutomaticIndicatorExplanation"] = "指示器使用最严格的可用额度窗口。数据可能有延迟；没有表情表示无法获取可靠的当前数据。⭐ 是推荐，不是保证。关闭自动指示会移除所有自动表情。",
+        ["CheckThisProfileAutomatically"] = "自动检查此配置",
+        ["CheckThisProfileAutomaticallyHelp"] = "仅在存在受支持的额度来源时使用。",
+        ["RefreshNow"] = "立即刷新",
+        ["TestProviderSupport"] = "测试来源支持",
+        ["LastSuccessfulRefresh"] = "上次成功刷新",
+        ["LastSafeError"] = "上次安全错误",
+        ["ClearCachedUsage"] = "清除自动数据缓存",
+        ["ProviderAvailable"] = "自动额度来源可用",
+        ["NoReliableUsageData"] = "没有可靠的当前额度数据。未知值不会显示为零。",
+        ["ResetsAt"] = "重置时间",
+        ["LastUpdated"] = "最后更新",
+        ["UsageDataStale"] = "额度数据已过期",
+        ["UsageSource"] = "来源",
+        ["CodexCliVersion"] = "Codex CLI 版本",
+        ["LastRefreshAttempt"] = "上次刷新尝试",
+        ["RefreshError"] = "刷新错误",
+        ["UsageWindow"] = "额度",
+
+        // Legend
+        ["RecommendedProfile"] = "推荐配置",
+        ["RecommendedProfileHelp"] = "在已检查的配置中，它目前的可用额度最高。",
+        ["HighCapacity"] = "额度充足",
+        ["HighCapacityHelp"] = "该配置仍有较多可用额度。",
+        ["MediumCapacity"] = "额度中等",
+        ["MediumCapacityHelp"] = "已有明显一部分额度被用掉。",
+        ["LowCapacity"] = "额度不足或已耗尽",
+        ["LowCapacityHelp"] = "请选择其他配置，或等待额度重置。",
+
+    };
+
     public static LanguagePreference Resolve(LanguagePreference preference, CultureInfo? culture = null)
     {
         if (preference != LanguagePreference.SystemDefault)
@@ -489,14 +736,28 @@ public static class LocalizationCatalog
         }
 
         culture ??= CultureInfo.CurrentUICulture;
-        return culture.TwoLetterISOLanguageName.Equals("ru", StringComparison.OrdinalIgnoreCase)
-            ? LanguagePreference.Russian
-            : LanguagePreference.English;
+        string language = culture.TwoLetterISOLanguageName;
+        if (language.Equals("ru", StringComparison.OrdinalIgnoreCase))
+        {
+            return LanguagePreference.Russian;
+        }
+
+        if (language.Equals("zh", StringComparison.OrdinalIgnoreCase))
+        {
+            return LanguagePreference.Chinese;
+        }
+
+        return LanguagePreference.English;
     }
 
     public static string Text(LanguagePreference preference, string key, params object[] args)
     {
-        IReadOnlyDictionary<string, string> dictionary = Resolve(preference) == LanguagePreference.Russian ? Russian : English;
+        IReadOnlyDictionary<string, string> dictionary = Resolve(preference) switch
+        {
+            LanguagePreference.Russian => Russian,
+            LanguagePreference.Chinese => Chinese,
+            _ => English,
+        };
         string value = dictionary.TryGetValue(key, out string? text)
             ? text
             : English.GetValueOrDefault(key, key);
@@ -506,5 +767,10 @@ public static class LocalizationCatalog
     public static IReadOnlyCollection<string> MissingRussianKeys()
     {
         return English.Keys.Where(key => !Russian.ContainsKey(key)).Order(StringComparer.Ordinal).ToArray();
+    }
+
+    public static IReadOnlyCollection<string> MissingChineseKeys()
+    {
+        return English.Keys.Where(key => !Chinese.ContainsKey(key)).Order(StringComparer.Ordinal).ToArray();
     }
 }

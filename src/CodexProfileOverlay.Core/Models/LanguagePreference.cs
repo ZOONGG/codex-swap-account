@@ -5,4 +5,5 @@ public enum LanguagePreference
     SystemDefault,
     English,
     Russian,
+    Chinese,
 }

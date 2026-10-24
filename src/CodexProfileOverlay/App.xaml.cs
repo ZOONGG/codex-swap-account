@@ -90,7 +90,9 @@ public partial class App : Application
                 : AppTheme.Dark;
             LanguagePreference language = e.Args.Contains("--ru", StringComparer.OrdinalIgnoreCase)
                 ? LanguagePreference.Russian
-                : LanguagePreference.English;
+                : e.Args.Contains("--zh", StringComparer.OrdinalIgnoreCase)
+                    ? LanguagePreference.Chinese
+                    : LanguagePreference.English;
             ApplyTheme(theme);
             var supportWindow = new SupportWindow(theme, language) { ShowInTaskbar = true };
             string? outputPath = ArgumentValue(e.Args, "--output=");
