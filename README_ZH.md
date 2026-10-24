@@ -131,6 +131,8 @@ CodexProfileOverlay.exe
 SHA256SUMS.txt
 ```
 
+Windows 安装程序提供英语、俄语和简体中文三种语言，默认以英语启动，可在语言对话框中选择其它语言。
+
 ### 系统要求
 
 - Windows 10 或 Windows 11

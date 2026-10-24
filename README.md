@@ -129,6 +129,8 @@ Integrity hashes:
 SHA256SUMS.txt
 ```
 
+The Windows installer offers English, Russian, and Simplified Chinese. Setup starts in English unless you pick another language in the language dialog.
+
 ### Requirements
 
 - Windows 10 or Windows 11

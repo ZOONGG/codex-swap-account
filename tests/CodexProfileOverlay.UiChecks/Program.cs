@@ -48,7 +48,7 @@ internal static class Program
         try
         {
             foreach (var theme in new[] { AppTheme.Dark, AppTheme.Light })
-            foreach (var language in new[] { LanguagePreference.English, LanguagePreference.Russian })
+            foreach (var language in new[] { LanguagePreference.English, LanguagePreference.Russian, LanguagePreference.Chinese })
             {
                 App.ApplyTheme(theme);
                 if (args.Contains("--hover-only")) { CheckPopup(temp, language); continue; }
@@ -57,8 +57,8 @@ internal static class Program
                 CheckAmounts(theme, language);
                 CheckPopup(temp, language);
             }
-            if (args.Contains("--hover-only")) { Console.WriteLine("PASS: Hover open/leave, popup entry, profile replacement, card click isolation and dimensions, bottom placement in expanded/compact, dark/light and RU/EN."); return; }
-            Console.WriteLine("PASS: Update card portable/installed/ready/progress; hover/bottom popup; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto input; dark/light and RU/EN.");
+            if (args.Contains("--hover-only")) { Console.WriteLine("PASS: Hover open/leave, popup entry, profile replacement, card click isolation and dimensions, bottom placement in expanded/compact, dark/light and EN/RU/ZH."); return; }
+            Console.WriteLine("PASS: Update card portable/installed/ready/progress; hover/bottom popup; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto input; dark/light and EN/RU/ZH.");
         }
         finally { app.Shutdown(); Directory.Delete(temp, true); }
     }

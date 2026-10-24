@@ -4,6 +4,7 @@
 
 ### Added
 - Simplified Chinese interface localization, selectable in Settings → Language and used automatically on Chinese Windows.
+- Simplified Chinese in the Windows installer: the setup wizard, update prompts, and error messages are translated, and `简体中文` is offered in the language dialog. Setup still starts in English (language auto-detection is disabled), so existing English/Russian installs and silent updates behave exactly as before.
 - `README_ZH.md` with a full Simplified Chinese project guide.
 
 ### Changed
