@@ -28,7 +28,12 @@ public static class LocalizationCatalog
         ["AccountSignInRequired"] = "Sign-in required",
         ["AccountUnknown"] = "Unknown",
         ["LoginWaiting"] = "Complete sign-in in your browser, then return here. You can cancel at any time. Login times out after 10 minutes.",
-        ["LoginRuntimeMissing"] = "The official Codex sign-in runtime was not found or could not start. Install or update the official Codex Desktop app for Windows, open it once, then retry here. No terminal or manual auth.json editing is needed.",
+        ["LoginRuntimeMissing"] = "The official Codex sign-in runtime was not found or could not start. Install or update Codex CLI (codex.exe on PATH) or the official Codex Desktop app for Windows, then retry here. No terminal or manual auth.json editing is needed.",
+        ["LoginProcessFailed"] = "Codex CLI exited with an error. Check your connection and retry browser sign-in. Existing accounts are unchanged.",
+        ["LoginAuthMissing"] = "Codex CLI finished without saving authorization. Update Codex CLI and retry. Existing accounts are unchanged.",
+        ["LoginTimedOut"] = "Sign-in timed out after 10 minutes. Retry browser sign-in. Existing accounts are unchanged.",
+        ["LoginAccessDenied"] = "Cannot access the login or profile directory. Check folder permissions and retry.",
+        ["LoginCleanupFailed"] = "The sign-in process did not stop in time. Close the Codex login process before retrying.",
         ["LoginFailed"] = "Sign-in did not complete. Existing accounts are unchanged. Retry browser sign-in.",
         ["ReauthorizeActiveConfirm"] = "Sign-in succeeded. Save your work in Codex. Close Codex safely and apply the new authorization? Cancelling keeps the previous authorization.",
         ["LoginRelaunchFailed"] = "Authorization was saved, but Codex could not reopen. Open Codex Desktop manually.",
@@ -269,7 +274,12 @@ public static class LocalizationCatalog
         ["AccountSignInRequired"] = "Требуется вход",
         ["AccountUnknown"] = "Не удалось проверить",
         ["LoginWaiting"] = "Завершите вход в браузере и вернитесь сюда. Вход можно отменить в любой момент. Время ожидания — 10 минут.",
-        ["LoginRuntimeMissing"] = "Официальный компонент входа Codex не найден или не запускается. Установите или обновите официальный Codex Desktop для Windows, откройте его один раз и повторите вход здесь. Терминал и ручное редактирование auth.json не нужны.",
+        ["LoginRuntimeMissing"] = "Официальный компонент входа Codex не найден или не запускается. Установите или обновите Codex CLI (codex.exe в PATH) либо официальный Codex Desktop для Windows и повторите вход. Терминал и ручное редактирование auth.json не нужны.",
+        ["LoginProcessFailed"] = "Codex CLI завершился с ошибкой. Проверьте подключение и повторите вход через браузер. Существующие аккаунты не изменены.",
+        ["LoginAuthMissing"] = "Codex CLI завершился без сохранения авторизации. Обновите Codex CLI и повторите вход. Существующие аккаунты не изменены.",
+        ["LoginTimedOut"] = "Время ожидания входа истекло (10 минут). Повторите вход через браузер. Существующие аккаунты не изменены.",
+        ["LoginAccessDenied"] = "Нет доступа к папке входа или профилей. Проверьте права доступа и повторите попытку.",
+        ["LoginCleanupFailed"] = "Процесс входа не завершился вовремя. Закройте процесс входа Codex перед повторной попыткой.",
         ["LoginFailed"] = "Вход не завершён. Существующие аккаунты не изменены. Повторите вход через браузер.",
         ["ReauthorizeActiveConfirm"] = "Вход выполнен. Сохраните работу в Codex. Безопасно закрыть Codex и применить новую авторизацию? При отмене сохранится прежняя авторизация.",
         ["LoginRelaunchFailed"] = "Авторизация сохранена, но Codex не удалось открыть. Запустите Codex Desktop вручную.",
@@ -510,7 +520,12 @@ public static class LocalizationCatalog
         ["AccountSignInRequired"] = "需要登录",
         ["AccountUnknown"] = "未知",
         ["LoginWaiting"] = "请在浏览器中完成登录后回到此处。你随时可以取消，登录将在 10 分钟后超时。",
-        ["LoginRuntimeMissing"] = "未找到官方 Codex 登录组件，或该组件无法启动。请安装或更新适用于 Windows 的官方 Codex 桌面应用，打开一次后在此重试。无需使用终端，也无需手动修改 auth.json。",
+        ["LoginRuntimeMissing"] = "未找到官方 Codex 登录组件，或该组件无法启动。请安装或更新 Codex CLI（PATH 中的 codex.exe）或适用于 Windows 的官方 Codex 桌面应用后重试。无需手动修改 auth.json。",
+        ["LoginProcessFailed"] = "Codex CLI 出错并退出。请检查网络连接后重试浏览器登录。现有账户未更改。",
+        ["LoginAuthMissing"] = "Codex CLI 已完成，但未保存授权。请更新 Codex CLI 后重试。现有账户未更改。",
+        ["LoginTimedOut"] = "登录等待超时（10 分钟）。请重试浏览器登录。现有账户未更改。",
+        ["LoginAccessDenied"] = "无法访问登录或配置目录。请检查文件夹权限后重试。",
+        ["LoginCleanupFailed"] = "登录进程未能及时停止。请关闭 Codex 登录进程后重试。",
         ["LoginFailed"] = "登录未完成。现有账户未发生变化。请重新通过浏览器登录。",
         ["ReauthorizeActiveConfirm"] = "登录成功。请先保存 Codex 中的工作。是否安全关闭 Codex 并应用新的授权？取消将保留原有授权。",
         ["LoginRelaunchFailed"] = "授权已保存，但无法重新打开 Codex。请手动启动 Codex 桌面应用。",
@@ -761,8 +776,17 @@ public static class LocalizationCatalog
         string value = dictionary.TryGetValue(key, out string? text)
             ? text
             : English.GetValueOrDefault(key, key);
-        return args.Length == 0 ? value : string.Format(CultureInfo.CurrentCulture, value, args);
+        return args.Length == 0 ? value : string.Format(FormattingCulture(preference), value, args);
     }
+
+    public static CultureInfo FormattingCulture(LanguagePreference preference) => preference == LanguagePreference.SystemDefault
+        ? CultureInfo.CurrentCulture
+        : CultureInfo.GetCultureInfo(Resolve(preference) switch
+        {
+            LanguagePreference.Russian => "ru-RU",
+            LanguagePreference.Chinese => "zh-CN",
+            _ => "en-US",
+        });
 
     public static IReadOnlyCollection<string> MissingRussianKeys()
     {

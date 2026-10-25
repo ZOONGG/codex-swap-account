@@ -436,8 +436,14 @@ internal sealed class OverlayController : IDisposable
     {
         if (installingUpdate || switching || accountOperation) return;
         EnsureOverlay();
-        string? name = ShowPrompt(PromptOwner(), localizer["AddProfileTitle"], localizer["ProfileDirectoryName"],
-            primaryText: localizer["BrowserLogin"]);
+        string? name;
+        accountOperation = true;
+        try
+        {
+            name = ShowPrompt(PromptOwner(), localizer["AddProfileTitle"], localizer["ProfileDirectoryName"],
+                primaryText: localizer["BrowserLogin"]);
+        }
+        finally { accountOperation = false; }
         if (name is null) return;
         string? error = !ProfileName.IsValid(name) ? "InvalidProfileName"
             : Directory.Exists(Path.Combine(paths.ProfilesDirectory, name)) || File.Exists(Path.Combine(paths.ProfilesDirectory, name)) ? "DuplicateProfileName" : null;
@@ -458,7 +464,8 @@ internal sealed class OverlayController : IDisposable
         }
         accountOperation = true;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(disposalTokenSource.Token);
-        cancellation.CancelAfter(TimeSpan.FromMinutes(10));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using var loginCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token, timeout.Token);
         var progress = new LoginProgressWindow(localizer, cancellation);
         CodexDesktopProcessSession? shutdown = null;
         PreparedCodexLaunch? launch = null;
@@ -466,20 +473,31 @@ internal sealed class OverlayController : IDisposable
         bool added = false;
         try
         {
-            ShowCodexOwnedWindow(progress);
-            var service = new ProfileLoginService(paths, profileManager, new OfficialProfileLoginRuntime());
+            var runtime = new OfficialProfileLoginRuntime();
+            runtime.EnsureAvailable();
+            Window? owner = PromptOwner();
+            if (owner is not null) progress.Owner = owner;
+            // Keep browser sign-in reachable from the taskbar, including when Codex closes.
+            progress.ShowInTaskbar = true;
+            DialogPlacement.CenterOnOwnerScreen(progress, owner, CurrentCodexWindowHandle());
+            progress.Show();
+            BringToFront(progress);
+            var service = new ProfileLoginService(paths, profileManager, runtime);
             bool success = await service.LoginAsync(name, reauthorize, token =>
                 Application.Current.Dispatcher.InvokeAsync(async () =>
                 {
                     if (!ConfirmDialog.Show(progress, IntPtr.Zero, localizer["Reauthorize"],
                         localizer["ReauthorizeActiveConfirm"], localizer["Reauthorize"], localizer["Cancel"])) return false;
+                    // Codex owns the auxiliary windows natively. Detach before closing it so
+                    // Windows cannot destroy the login window with that owner chain.
+                    progress.Owner = null;
                     launch = await processService.PrepareLaunchAsync(token);
                     shutdown = await processService.CloseCodexAsync(settings.GracefulCloseTimeoutSeconds,
                         settings.ForceCloseFallback, token);
                     CodexShutdownCoordinator.VerifyStopped(shutdown, token);
                     stopped = true;
                     return true;
-                }).Task.Unwrap(), cancellation.Token);
+                }).Task.Unwrap(), loginCancellation.Token);
             if (success)
             {
                 added = !reauthorize;
@@ -490,19 +508,27 @@ internal sealed class OverlayController : IDisposable
                 RefreshProfiles();
                 overlayWindow?.ShowNotification(localizer[reauthorize ? "Reauthorized" : "ProfileAdded"]);
             }
-            else overlayWindow?.ShowError(localizer["LoginFailed"]);
+            else if (!loginCancellation.IsCancellationRequested) ShowLoginError("LoginFailed");
         }
         catch (LoginRuntimeUnavailableException)
         {
-            System.Windows.MessageBox.Show(progress, localizer["LoginRuntimeMissing"], localizer["BrowserLogin"],
+            System.Windows.MessageBox.Show(progress.IsVisible ? progress : PromptOwner(), localizer["LoginRuntimeMissing"], localizer["BrowserLogin"],
                 MessageBoxButton.OK, MessageBoxImage.Information);
         }
-        catch (OperationCanceledException) { }
+        catch (LoginProcessFailedException) { ShowLoginError("LoginProcessFailed"); }
+        catch (LoginAuthMissingException) { ShowLoginError("LoginAuthMissing"); }
+        catch (OperationCanceledException)
+        {
+            if (timeout.IsCancellationRequested && !cancellation.IsCancellationRequested) ShowLoginError("LoginTimedOut");
+        }
+        catch (UnauthorizedAccessException) { ShowLoginError("LoginAccessDenied"); }
+        catch (TimeoutException) { ShowLoginError("LoginCleanupFailed"); }
+        catch (LoginCleanupException) { ShowLoginError("LoginCleanupFailed"); }
         catch (Exception)
         {
             // Never include runtime output or credential parser errors in logs.
             logger.Error("Account login failed.");
-            overlayWindow?.ShowError(localizer["LoginFailed"]);
+            ShowLoginError("LoginFailed");
         }
         finally
         {
@@ -521,6 +547,13 @@ internal sealed class OverlayController : IDisposable
             localizer["ConfirmSwitchPrimary"], localizer["Cancel"]))
         {
             await SwitchProfileAsync(name);
+        }
+
+        void ShowLoginError(string key)
+        {
+            if (!disposalTokenSource.IsCancellationRequested)
+                System.Windows.MessageBox.Show(progress.IsVisible ? progress : PromptOwner(), localizer[key],
+                    localizer["BrowserLogin"], MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -681,6 +714,7 @@ internal sealed class OverlayController : IDisposable
 
     private Window? PromptOwner()
     {
+        if (profileManagerWindow is { IsVisible: true, IsActive: true }) return profileManagerWindow;
         if (settingsWindow is { IsVisible: true })
         {
             return settingsWindow;

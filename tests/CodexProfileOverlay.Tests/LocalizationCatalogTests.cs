@@ -6,6 +6,31 @@ namespace CodexProfileOverlay.Tests;
 
 public sealed class LocalizationCatalogTests
 {
+    [Theory]
+    [InlineData(LanguagePreference.Chinese, "zh-CN")]
+    [InlineData(LanguagePreference.Russian, "ru-RU")]
+    [InlineData(LanguagePreference.English, "en-US")]
+    public void ExplicitLanguageControlsFormatting(LanguagePreference language, string culture)
+        => Assert.Equal(culture, LocalizationCatalog.FormattingCulture(language).Name);
+
+    [Fact]
+    public void AllCatalogPlaceholdersMatchEnglish()
+    {
+        var fields = typeof(LocalizationCatalog).GetFields(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var english = (IReadOnlyDictionary<string, string>)fields.Single(f => f.Name == "English").GetValue(null)!;
+        foreach (string name in new[] { "Russian", "Chinese" })
+        {
+            var translated = (IReadOnlyDictionary<string, string>)fields.Single(f => f.Name == name).GetValue(null)!;
+            foreach (var entry in english)
+            {
+                static string[] Slots(string text) => System.Text.RegularExpressions.Regex.Matches(text, @"\{\d+(?:[^{}]*)\}")
+                    .Select(m => m.Value).Order().ToArray();
+                Assert.Equal(Slots(entry.Value), Slots(translated[entry.Key]));
+                _ = string.Format(LocalizationCatalog.FormattingCulture(LanguagePreference.Chinese), translated[entry.Key],
+                    Enumerable.Repeat<object>(1, 10).ToArray());
+            }
+        }
+    }
     [Fact]
     public void RussianCatalogCoversEnglishKeys()
     {

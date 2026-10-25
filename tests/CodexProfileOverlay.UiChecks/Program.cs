@@ -13,6 +13,8 @@ internal static class Program
 {
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr handle);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(IntPtr handle);
 
     [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowStyle(IntPtr handle, int index);
@@ -36,6 +38,22 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Contains("--hold-login-pipes")) { Thread.Sleep(10000); return; }
+        if (args.Contains("login") && args.Contains("-c"))
+        {
+            string mode = File.ReadAllText("fixture-mode.txt");
+            if (mode == "wait") Thread.Sleep(10000);
+            if (mode == "fail") { Environment.ExitCode = 7; return; }
+            if (mode == "success") File.WriteAllText("auth.json", "FAKE TEST AUTH ONLY");
+            if (mode == "pipes")
+            {
+                var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!)
+                { Arguments = "--hold-login-pipes", UseShellExecute = false, CreateNoWindow = true })!;
+                File.WriteAllText("fixture-child.txt", child.Id.ToString());
+                child.Dispose();
+            }
+            return;
+        }
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var source = System.Xml.Linq.XDocument.Load(Path.Combine(AppContext.BaseDirectory, "AppResources.xaml"));
         System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
@@ -47,23 +65,154 @@ internal static class Program
         Directory.CreateDirectory(temp);
         try
         {
+            if (args.Contains("--login-only")) { CheckLoginRuntime(temp); return; }
+            if (args.Contains("--dialogs-only"))
+                foreach (var screen in System.Windows.Forms.Screen.AllScreens)
+                    Console.WriteLine($"Monitor: {screen.DeviceName}, bounds={screen.Bounds}, workArea={screen.WorkingArea}, primary={screen.Primary}");
             foreach (var theme in new[] { AppTheme.Dark, AppTheme.Light })
             foreach (var language in new[] { LanguagePreference.English, LanguagePreference.Russian, LanguagePreference.Chinese })
             {
                 App.ApplyTheme(theme);
+                if (args.Contains("--dialogs-only"))
+                {
+                    foreach (var screen in System.Windows.Forms.Screen.AllScreens) CheckLoginDialogs(language, screen);
+                    continue;
+                }
                 if (args.Contains("--hover-only")) { CheckPopup(temp, language); continue; }
-                CheckSettings(temp, theme, language);
+                CheckSettings(temp, theme, language, args.Contains("--localization-only"));
                 CheckProfileManager(language);
                 CheckAmounts(theme, language);
                 CheckPopup(temp, language);
             }
+            if (args.Contains("--dialogs-only")) { Console.WriteLine("PASS: prompt modal ownership, progress cancellation/reopen, physical bounds and display-change recovery; EN/RU/ZH, dark/light. Physical multi-monitor scenario still requires manual testing."); return; }
+            if (args.Contains("--localization-only")) { Console.WriteLine("PASS: language combo switches EN/RU/ZH, settings retained, profile manager, support amounts and usage cards; dark/light."); return; }
             if (args.Contains("--hover-only")) { Console.WriteLine("PASS: Hover open/leave, popup entry, profile replacement, card click isolation and dimensions, bottom placement in expanded/compact, dark/light and EN/RU/ZH."); return; }
             Console.WriteLine("PASS: Update card portable/installed/ready/progress; hover/bottom popup; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto input; dark/light and EN/RU/ZH.");
         }
         finally { app.Shutdown(); Directory.Delete(temp, true); }
     }
 
-    private static void CheckSettings(string temp, AppTheme theme, LanguagePreference language)
+    private static void CheckLoginRuntime(string temp)
+    {
+        var runtime = new OfficialProfileLoginRuntime(() => Environment.ProcessPath);
+        runtime.EnsureAvailable();
+        foreach (string mode in new[] { "fail", "missing", "success", "wait", "pipes", "success" })
+        {
+            string directory = Path.Combine(temp, mode + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "fixture-mode.txt"), mode);
+            using var cancellation = new CancellationTokenSource();
+            if (mode == "wait") cancellation.CancelAfter(500);
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                bool result = runtime.LoginAsync(directory, cancellation.Token).GetAwaiter().GetResult();
+                Check(mode == "success" && result, "Only successful login may return true");
+            }
+            catch (LoginProcessFailedException) { Check(mode == "fail", "Typed CLI failure"); }
+            catch (LoginAuthMissingException) { Check(mode is "missing" or "pipes", "Typed missing authorization"); }
+            catch (OperationCanceledException) { Check(mode == "wait", "Cancellation terminates CLI"); }
+            finally
+            {
+                string childFile = Path.Combine(directory, "fixture-child.txt");
+                if (File.Exists(childFile))
+                {
+                    try { using var child = System.Diagnostics.Process.GetProcessById(int.Parse(File.ReadAllText(childFile))); child.Kill(true); child.WaitForExit(5000); }
+                    catch (ArgumentException) { }
+                }
+            }
+            Check(timer.Elapsed < TimeSpan.FromSeconds(5), "Login cleanup must be bounded, even with inherited pipes");
+        }
+        Console.WriteLine("PASS: real subprocess exit failure, missing auth, success, timeout/cancel, inherited pipes, retry; fake credentials only.");
+    }
+
+    private static void CheckLoginDialogs(LanguagePreference language, System.Windows.Forms.Screen screen)
+    {
+        var assembly = typeof(App).Assembly;
+        var localizer = Activator.CreateInstance(assembly.GetType("CodexProfileOverlay.Localizer")!, language)!;
+        var placement = assembly.GetType("CodexProfileOverlay.DialogPlacement")!.GetMethod("CenterOnOwnerScreen")!;
+        var owner = new Window { Width = 600, Height = 400, ShowInTaskbar = false };
+        owner.Show();
+        SetWindowPos(new System.Windows.Interop.WindowInteropHelper(owner).Handle, IntPtr.Zero,
+            screen.WorkingArea.Left + 100, screen.WorkingArea.Top + 100, 0, 0, 0x15);
+        try
+        {
+            foreach (bool native in new[] { false, true })
+            {
+                if (native) owner.WindowState = WindowState.Minimized;
+                Exception? failure = null;
+                var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+                timer.Tick += (_, _) =>
+                {
+                    timer.Stop();
+                    var prompt = Application.Current.Windows.Cast<Window>().Single(w => w.GetType().Name == "PromptDialog");
+                    try
+                    {
+                        CheckVisible(prompt);
+                        Check(System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(prompt).Handle).DeviceName == screen.DeviceName,
+                            "Prompt must open on its owner's monitor");
+                        Check(!IsWindowEnabled(new System.Windows.Interop.WindowInteropHelper(owner).Handle), "ShowDialog must disable the native owner while prompt remains reachable");
+                        if (!native) Check(prompt.Owner == owner, "Managed prompt owner must be preserved");
+                    }
+                    catch (Exception e) { failure = e; }
+                    finally { prompt.DialogResult = false; }
+                };
+                timer.Start();
+                var method = assembly.GetType("CodexProfileOverlay.PromptDialog")!.GetMethod("Show", BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)!;
+                var result = method.Invoke(null, new object?[] { native ? null : owner,
+                    native ? new System.Windows.Interop.WindowInteropHelper(owner).Handle : IntPtr.Zero,
+                    "Prompt", "Profile", "", "OK", "Cancel" });
+                if (failure is not null) throw failure;
+                Check(result is null && IsWindowEnabled(new System.Windows.Interop.WindowInteropHelper(owner).Handle), "Cancel restores modal owner");
+            }
+            for (int i = 0; i < 2; i++)
+            {
+                using var token = new CancellationTokenSource();
+                var progress = (Window)Activator.CreateInstance(assembly.GetType("CodexProfileOverlay.LoginProgressWindow")!, localizer, token)!;
+                progress.Owner = owner;
+                placement.Invoke(null, new object?[] { progress, owner, IntPtr.Zero });
+                progress.Show(); progress.UpdateLayout();
+                PumpDispatcher(progress);
+                CheckVisible(progress);
+                Check(System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(progress).Handle).DeviceName == screen.DeviceName,
+                    "Login must open on its owner's monitor");
+                var hwnd = new System.Windows.Interop.WindowInteropHelper(progress).Handle;
+                SetWindowPos(hwnd, IntPtr.Zero, 30000, -30000, 0, 0, 0x15);
+                SendMessage(hwnd, 0x007E, IntPtr.Zero, IntPtr.Zero);
+                PumpDispatcher(progress);
+                CheckVisible(progress);
+                progress.Close();
+                Check(token.IsCancellationRequested && !progress.IsVisible, "Closing progress cancels and removes the window");
+            }
+        }
+        finally { owner.Close(); }
+    }
+
+    private static void PumpDispatcher(Window window)
+    {
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            new Action(() => frame.Continue = false));
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RectPixels { public int Left, Top, Right, Bottom; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RectPixels rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
+    private static void CheckVisible(Window window)
+    {
+        var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        Check(IsWindowVisible(handle) && GetWindowRect(handle, out var _), "Dialog HWND must be visible");
+        GetWindowRect(handle, out var rect);
+        var area = System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
+        Check(rect.Left >= area.Left && rect.Top >= area.Top && rect.Right <= area.Right && rect.Bottom <= area.Bottom,
+            "Dialog must fit its physical monitor work area");
+    }
+
+    private static void CheckSettings(string temp, AppTheme theme, LanguagePreference language, bool localizationOnly = false)
     {
         var assembly = typeof(App).Assembly;
         var paths = new AppPaths(temp, temp);
@@ -89,6 +238,23 @@ internal static class Program
         window.ShowInTaskbar = false;
         window.Show();
         window.UpdateLayout();
+        if (localizationOnly)
+        {
+            foreach (var selected in new[] { LanguagePreference.English, LanguagePreference.Russian, LanguagePreference.Chinese, language })
+            {
+                var page = (UIElement)Invoke(window, "BuildLanguagePage")!;
+                var host = (Grid)Field(window, "contentHost");
+                host.Children.Clear(); host.Children.Add(page); window.UpdateLayout();
+                var combo = Descendants(page).OfType<ComboBox>().Single();
+                combo.SelectedValue = selected;
+                Check(settings.Language == selected, "Language combo must update settings");
+                Check((LanguagePreference)localizerType.GetProperty("Language")!.GetValue(localizer)! == selected,
+                    "Language change must reach the localizer");
+                Check(settings.Theme == theme, "Language changes must retain the theme");
+            }
+            window.GetType().GetMethod("CloseForShutdown")!.Invoke(window, null);
+            return;
+        }
         double width = window.Width, height = window.Height, left = window.Left, top = window.Top;
         window.Close();
         Check(!window.IsVisible && !IsWindowVisible(new System.Windows.Interop.WindowInteropHelper(window).Handle), "Settings X must hide native window");

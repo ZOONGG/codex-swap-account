@@ -109,15 +109,17 @@ Create, organize, and manage local Codex profiles.
 
 Go to the [latest GitHub release](https://github.com/ZOONGG/codex-swap-account/releases/latest).
 
-Current stable release: **v1.0.0** (September 20, 2026).
+Current stable release: [**v1.1.0**](https://github.com/ZOONGG/codex-swap-account/releases/tag/v1.1.0) (October 12, 2026).
 
-Recommended download:
+Windows installer: [CodexSwapAccount-win-x64-setup.exe](https://github.com/ZOONGG/codex-swap-account/releases/download/v1.1.0/CodexSwapAccount-win-x64-setup.exe).
+
+Portable archive:
 
 ```text
 CodexProfileOverlay-win-x64-portable.zip
 ```
 
-Standalone executable:
+The portable archive contains the self-contained executable (no separate .NET runtime required):
 
 ```text
 CodexProfileOverlay.exe
@@ -129,14 +131,14 @@ Integrity hashes:
 SHA256SUMS.txt
 ```
 
-The Windows installer offers English, Russian, and Simplified Chinese. Setup starts in English unless you pick another language in the language dialog.
+The stable v1.1.0 installer offers English and Russian; the next update adds Simplified Chinese. Setup starts in English unless you pick another language in the language dialog.
 
 ### Requirements
 
 - Windows 10 or Windows 11
 - x64 system
 - Codex desktop app
-- Codex CLI available in `PATH` when adding a new profile
+- Codex CLI (`codex.exe` on `PATH`) or a discoverable official Codex Desktop runtime for adding profiles
 
 > [!NOTE]
 > Windows SmartScreen may warn about an unsigned executable. This is expected for an independently distributed open-source build. Verify the SHA-256 hash from the release and review/build the source if you prefer.
@@ -221,12 +223,14 @@ At startup and after a switch, the app keeps at most five completed backups, rem
 
 The **Add profile** flow:
 
-1. creates a directory under `%USERPROFILE%\.codex-profiles`;
-2. creates a profile-local `config.toml` when required;
-3. runs `codex login` with `CODEX_HOME` set only for that login process;
-4. waits for browser authentication;
-5. checks that the profile authorization file exists;
-6. adds the profile to the switcher.
+1. asks for a unique profile directory name and checks for Codex CLI;
+2. creates an isolated temporary login directory;
+3. runs `codex login` with file-based credentials and `CODEX_HOME` set only for that login process;
+4. waits for browser authentication (cancel at any time; timeout: 10 minutes);
+5. publishes only the successful `auth.json` into `%USERPROFILE%\.codex-profiles`;
+6. adds the profile to the switcher and offers to switch to it.
+
+Failed or cancelled authorization preserves existing accounts and shared history. Reauthorize updates an existing account; applying authorization to the active account requires confirmation to close Codex safely. Account status is Available after recent successful sign-in, Sign-in required when confirmed by Codex, or Unknown when validity cannot be established.
 
 The app never displays or logs the credential contents.
 
@@ -264,7 +268,7 @@ When a supported provider becomes available, the overlay remains emoji-only:
 
 The effective capacity is the lowest remaining percentage across all reported windows. For example, 99% remaining in the 5-hour window plus 0% remaining in the weekly window is 🔴. A recommendation requires at least two fresh comparable profiles, maximizes that lowest percentage, then uses average capacity and nearest reset as tie-breakers. An exact tie produces no recommendation. Unknown usage is never displayed as zero. Cached automatic snapshots are kept when the feature is disabled or a refresh fails.
 
-When the master toggle is off, no background CLI sessions are started, no automatic emoji is displayed, and cached snapshots are preserved. **Refresh now** intentionally refreshes the selected profile, while the normal overlay shows only one small emoji beside the profile name. Detailed percentages and reset times are shown in Settings and in the indicator tooltip.
+When the master toggle is off, no background CLI sessions are started, no automatic emoji is displayed, and cached snapshots are preserved. **Refresh now** intentionally refreshes the selected profile, while the normal overlay shows one small emoji beside the profile name. Detailed percentages and reset countdowns are shown in Settings and in the profile hover card. Optional tray usage shows the active account's remaining percentage; stale or unknown values are hidden.
 
 ## System tray
 
@@ -315,6 +319,10 @@ Download the portable ZIP, extract it, and run:
 ```powershell
 .\CodexProfileOverlay.exe
 ```
+
+### Windows installer
+
+Run `CodexSwapAccount-win-x64-setup.exe`. It installs per-user to `%LOCALAPPDATA%\Programs\CodexSwapAccount` without administrator rights. Updating an existing installation preserves accounts and settings. Uninstall through Windows Settings → Apps.
 
 ### Per-user installation from source
 
@@ -396,6 +404,8 @@ Output:
 ```text
 artifacts\publish\CodexProfileOverlay.exe
 artifacts\CodexProfileOverlay-win-x64-portable.zip
+artifacts\CodexSwapAccount-win-x64-setup.exe
+artifacts\SHA256SUMS.txt
 ```
 
 ## Repository structure
@@ -439,7 +449,7 @@ Another application may already own that shortcut. Open **Settings → Hotkeys**
 
 ### A profile cannot send requests
 
-The stored login may have expired or been revoked. Remove/re-add the local profile or authenticate it again through the Add profile flow.
+The stored login may have expired or been revoked. Use Reauthorize in the profile manager to sign in again without deleting the profile.
 
 ### Windows SmartScreen blocks the app
 
@@ -450,7 +460,7 @@ Choose **More info → Run anyway** only after downloading from the official rep
 - Windows x64 only.
 - Switching requires Codex to restart so it can load the selected authorization.
 - Adding profiles requires the Codex CLI.
-- The current installer is a per-user PowerShell installer rather than MSI/MSIX.
+- The downloadable installer uses Inno Setup and installs per-user. PowerShell installation remains available from source.
 - The application depends on window/process metadata available to a normal Windows user process.
 
 ## Contributing

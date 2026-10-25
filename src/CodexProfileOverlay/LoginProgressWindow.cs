@@ -12,7 +12,7 @@ internal sealed class LoginProgressWindow : Window
         Icon = AppIcons.WindowIcon;
         Width = 480; SizeToContent = SizeToContent.Height;
         ResizeMode = ResizeMode.NoResize;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        WindowStartupLocation = WindowStartupLocation.Manual;
         Background = (Brush)Application.Current.FindResource("WindowBackgroundBrush");
         Foreground = (Brush)Application.Current.FindResource("StrongTextBrush");
         var panel = new StackPanel { Margin = new Thickness(24) };

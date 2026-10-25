@@ -3,6 +3,9 @@ using System.Diagnostics;
 namespace CodexProfileOverlay.Core.Services;
 
 public sealed class LoginRuntimeUnavailableException : Exception { }
+public sealed class LoginProcessFailedException : Exception { }
+public sealed class LoginAuthMissingException : Exception { }
+public sealed class LoginCleanupException : Exception { }
 
 public interface IProfileLoginRuntime
 {
@@ -12,13 +15,20 @@ public interface IProfileLoginRuntime
 public sealed class OfficialProfileLoginRuntime : IProfileLoginRuntime
 {
     private readonly Func<string?> locate;
+    private string? executable;
     public OfficialProfileLoginRuntime(Func<string?>? locate = null) => this.locate = locate ?? CodexCliLocator.FindExecutable;
+
+    public void EnsureAvailable()
+    {
+        executable = locate();
+        if (executable is null || !File.Exists(executable)) throw new LoginRuntimeUnavailableException();
+    }
 
     public async Task<bool> LoginAsync(string directory, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        string executable = locate() ?? throw new LoginRuntimeUnavailableException();
-        var info = new ProcessStartInfo(executable)
+        if (executable is null) EnsureAvailable();
+        var info = new ProcessStartInfo(executable!)
         {
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true,
@@ -33,24 +43,37 @@ public sealed class OfficialProfileLoginRuntime : IProfileLoginRuntime
         using var process = new Process { StartInfo = info };
         try { process.Start(); }
         catch (System.ComponentModel.Win32Exception) { throw new LoginRuntimeUnavailableException(); }
-        Task output = DrainAsync(process.StandardOutput);
-        Task error = DrainAsync(process.StandardError);
+        using var draining = new CancellationTokenSource();
+        Task output = DrainAsync(process.StandardOutput, draining.Token);
+        Task error = DrainAsync(process.StandardError, draining.Token);
         try { await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false); }
         finally
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            await Task.WhenAll(output, error).ConfigureAwait(false);
+            try
+            {
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { throw new LoginCleanupException(); }
+                await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            }
+            finally
+            {
+                // A child may inherit the pipes. Do not wait forever for EOF after the CLI exits.
+                draining.Cancel();
+                try { await Task.WhenAll(output, error).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (draining.IsCancellationRequested) { }
+            }
         }
         cancellationToken.ThrowIfCancellationRequested();
-        return process.ExitCode == 0 && File.Exists(Path.Combine(directory, "auth.json"));
+        if (process.ExitCode != 0) throw new LoginProcessFailedException();
+        if (!File.Exists(Path.Combine(directory, "auth.json"))) throw new LoginAuthMissingException();
+        return true;
     }
 
-    internal static async Task DrainAsync(StreamReader reader)
+    internal static async Task DrainAsync(StreamReader reader, CancellationToken cancellationToken = default)
     {
         char[] buffer = new char[4096];
-        while (await reader.ReadAsync(buffer).ConfigureAwait(false) > 0) { }
+        while (await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false) > 0) { }
     }
 }
 

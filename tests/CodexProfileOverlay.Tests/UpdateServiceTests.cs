@@ -33,14 +33,15 @@ public sealed class UpdateServiceTests
     [Theory]
     [InlineData("v1.0.0", false)]
     [InlineData("v1.1.0", false)]
-    [InlineData("v1.1.1", true)]
+    [InlineData("v1.1.1", false)]
+    [InlineData("v1.1.2", true)]
     [InlineData("v1.2.0", true)]
-    public async Task Release110DetectsOnlyNewer(string tag, bool expected)
+    public async Task Release111DetectsOnlyNewer(string tag, bool expected)
     {
         using var temp = new TempDirectory();
         using var handler = new Handler((_, _) => Task.FromResult(Response(Release(tag))));
         using var service = new UpdateService(Path.Combine(temp.Path, "update.json"), new HttpClient(handler));
-        Assert.Equal("1.1.0", service.CurrentVersion);
+        Assert.Equal("1.1.1", service.CurrentVersion);
         await service.CheckAsync(true);
         Assert.Equal(expected, service.HasUpdate);
         Assert.Null(service.ErrorKey);

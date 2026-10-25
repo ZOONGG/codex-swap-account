@@ -111,15 +111,17 @@ Codex Swap Account 把这一过程变成一次点击：
 
 前往[最新的 GitHub 发布页](https://github.com/ZOONGG/codex-swap-account/releases/latest)。
 
-当前稳定版：**v1.0.0**（2026 年 9 月 20 日）。
+当前稳定版：[**v1.1.0**](https://github.com/ZOONGG/codex-swap-account/releases/tag/v1.1.0)（2026 年 10 月 12 日）。
 
-推荐下载：
+Windows 安装程序：[CodexSwapAccount-win-x64-setup.exe](https://github.com/ZOONGG/codex-swap-account/releases/download/v1.1.0/CodexSwapAccount-win-x64-setup.exe)。
+
+便携版下载：
 
 ```text
 CodexProfileOverlay-win-x64-portable.zip
 ```
 
-独立可执行文件：
+便携版包含独立可执行文件（无需另外安装 .NET 运行时）：
 
 ```text
 CodexProfileOverlay.exe
@@ -131,14 +133,14 @@ CodexProfileOverlay.exe
 SHA256SUMS.txt
 ```
 
-Windows 安装程序提供英语、俄语和简体中文三种语言，默认以英语启动，可在语言对话框中选择其它语言。
+稳定版 v1.1.0 安装程序提供英语和俄语；下一次更新将添加简体中文。默认以英语启动，可在语言对话框中选择其它语言。
 
 ### 系统要求
 
 - Windows 10 或 Windows 11
 - x64 系统
 - Codex 桌面应用
-- 添加新配置时，`PATH` 中需要有 Codex CLI
+- 添加配置时需要 `PATH` 中的 Codex CLI (`codex.exe`) 或可检测到的官方 Codex Desktop 运行时
 
 > [!NOTE]
 > Windows SmartScreen 可能会提示该可执行文件未签名。对于独立分发的开源构建来说这是正常现象。请核对发布页中的 SHA-256 哈希，或自行审阅/构建源码。
@@ -223,12 +225,14 @@ Codex Swap Account 让该目录和本地状态对所有配置保持不变：
 
 **添加配置**流程会：
 
-1. 在 `%USERPROFILE%\.codex-profiles` 下创建目录；
-2. 在需要时创建配置内的 `config.toml`；
-3. 以仅对该登录进程生效的 `CODEX_HOME` 运行 `codex login`；
-4. 等待浏览器认证；
-5. 检查配置授权文件是否存在；
-6. 将配置加入切换器。
+1. 请求唯一的配置目录名称并检查 Codex CLI；
+2. 创建隔离的临时登录目录；
+3. 使用文件凭证存储运行 `codex login`，`CODEX_HOME` 仅对登录进程生效；
+4. 等待浏览器认证（可随时取消，10 分钟后超时）；
+5. 仅将成功的 `auth.json` 保存到 `%USERPROFILE%\.codex-profiles`；
+6. 将配置加入切换器并询问是否切换。
+
+登录失败或取消时，现有账户和共享历史保持不变。重新授权可更新已有账户；应用到当前账户前会请求安全关闭 Codex 的确认。账户状态“可用”表示近期登录成功，“需要登录”由 Codex 确认，“未知”表示无法可靠判断。
 
 应用永远不会显示或记录凭证内容。
 
@@ -266,7 +270,7 @@ Codex Swap Account 让该目录和本地状态对所有配置保持不变：
 
 有效容量取所有已报告窗口中最低的剩余百分比。例如 5 小时窗口剩余 99%、每周窗口剩余 0% 时显示 🔴。推荐至少需要两个新鲜的、可比较的配置，先取最低百分比最高者，再以平均容量和最近的重置时间作为决胜条件。完全相同时不产生推荐。未知用量永远不显示为零。禁用该功能或刷新失败时，缓存的自动快照会被保留。
 
-关闭主开关后，不会启动任何后台 CLI 会话，不显示自动表情，并保留缓存快照。**立即刷新**会有意刷新所选配置，而普通面板只在配置名称旁显示一个小表情。详细的百分比和重置时间显示在设置中和指示器的悬浮提示里。
+关闭主开关后，不会启动任何后台 CLI 会话，不显示自动表情，并保留缓存快照。**立即刷新**会有意刷新所选配置。详细的百分比和重置倒计时显示在设置和配置悬浮卡片中。可选的托盘额度显示当前账户的剩余百分比；未知或过期值会隐藏。
 
 ## 系统托盘
 
@@ -317,6 +321,10 @@ Codex Swap Account 完全在本地机器上运行。
 ```powershell
 .\CodexProfileOverlay.exe
 ```
+
+### Windows 安装程序
+
+运行 `CodexSwapAccount-win-x64-setup.exe`。按当前用户安装到 `%LOCALAPPDATA%\Programs\CodexSwapAccount`，无需管理员权限。覆盖更新保留账户和设置。可通过 Windows 设置 → 应用卸载。
 
 ### 从源码按用户安装
 
@@ -398,6 +406,8 @@ cd codex-swap-account
 ```text
 artifacts\publish\CodexProfileOverlay.exe
 artifacts\CodexProfileOverlay-win-x64-portable.zip
+artifacts\CodexSwapAccount-win-x64-setup.exe
+artifacts\SHA256SUMS.txt
 ```
 
 ## 仓库结构
@@ -441,7 +451,7 @@ artifacts\CodexProfileOverlay-win-x64-portable.zip
 
 ### 某个配置无法发送请求
 
-已保存的登录可能已过期或被撤销。移除并重新添加该本地配置，或通过“添加配置”流程重新认证。
+已保存的登录可能已过期或被撤销。请在配置管理中使用重新授权，无需删除配置。
 
 ### Windows SmartScreen 阻止了应用
 
@@ -452,7 +462,7 @@ artifacts\CodexProfileOverlay-win-x64-portable.zip
 - 仅支持 Windows x64。
 - 切换需要重启 Codex，以便加载所选授权。
 - 添加配置需要 Codex CLI。
-- 当前安装程序是按用户的 PowerShell 安装程序，而不是 MSI/MSIX。
+- 可下载的安装程序使用 Inno Setup，按当前用户安装；仍可从源码使用 PowerShell 安装。
 - 应用依赖普通 Windows 用户进程可获取的窗口/进程元数据。
 
 ## 参与贡献
