@@ -21,7 +21,7 @@ public partial class SupportWindow : Window
     private Action? embeddedClose;
     private FrameworkElement? embeddedPanel;
     private readonly AppTheme theme;
-    private readonly bool russian;
+    private readonly LanguagePreference language;
     private HttpClient? httpClient;
     private SupportFlowController? flow;
     private CancellationTokenSource? dialogCancellation;
@@ -32,7 +32,7 @@ public partial class SupportWindow : Window
     public SupportWindow(AppTheme theme, LanguagePreference language)
     {
         this.theme = theme;
-        russian = LocalizationCatalog.Resolve(language) == LanguagePreference.Russian;
+        this.language = LocalizationCatalog.Resolve(language);
         InitializeComponent();
         Icon = AppIcons.WindowIcon;
         WindowCaptionThemeService.Apply(this, theme);
@@ -77,11 +77,21 @@ public partial class SupportWindow : Window
         else Close();
     }
 
-    private CultureInfo AmountCulture => russian
-        ? CultureInfo.GetCultureInfo("ru-RU")
-        : CultureInfo.GetCultureInfo("en-US");
+    private CultureInfo AmountCulture => CultureInfo.GetCultureInfo(language switch
+    {
+        LanguagePreference.Russian => "ru-RU",
+        LanguagePreference.Chinese => "zh-CN",
+        _ => "en-US",
+    });
 
-    private string T(string ru, string en) => russian ? ru : en;
+    private string CheckoutLocale => language == LanguagePreference.Russian ? "ru" : "en";
+
+    private string T(string ru, string en, string zh) => language switch
+    {
+        LanguagePreference.Russian => ru,
+        LanguagePreference.Chinese => zh,
+        _ => en,
+    };
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -93,8 +103,8 @@ public partial class SupportWindow : Window
         if (!configuration.IsConfigured)
         {
             ShowTerminal(
-                T("Поддержка пока недоступна", "Support is not available yet"),
-                T("Сервис поддержки не настроен в этой сборке.", configuration.Error ?? "The support service is not configured in this build."),
+                T("Поддержка пока недоступна", "Support is not available yet", "支持功能暂不可用"),
+                T("Сервис поддержки не настроен в этой сборке.", configuration.Error ?? "The support service is not configured in this build.", "此版本未配置支持服务。"),
                 canCreateNew: false);
             return;
         }
@@ -147,32 +157,33 @@ public partial class SupportWindow : Window
 
     private void ApplyLocalizedText()
     {
-        AutomationProperties.SetName(CloseButton, T("Закрыть поддержку", "Close support"));
-        Title = T("Поддержать Codex Swap Account", "Support Codex Swap Account");
-        SupportTitle.Text = T("Поддержать Codex Swap Account", "Support Codex Swap Account");
-        SupportSubtitle.Text = T("Приложение бесплатно и имеет открытый исходный код.", "The app is free and open source.");
-        LoadingText.Text = T("Загрузка способов оплаты…", "Loading payment methods…");
-        IntroText.Text = T("Если проект вам полезен, вы можете поддержать его развитие.", "If the project helps you, you can support its development.");
-        TelegramMethodTitle.Text = T("Звёзды Telegram", "Telegram Stars");
-        CryptoMethodTitle.Text = T("Криптовалюта", "Crypto");
-        ChooseAmountTitle.Text = T("Выберите сумму", "Choose amount");
-        TermsText.Text = T("Продолжая, вы принимаете условия добровольной поддержки.", "By continuing, you accept the voluntary support terms.");
-        TermsHint.Text = T("Поддержка не открывает платные функции и не включает регулярные платежи.", "Support does not unlock paid features or start recurring payments.");
-        BackToMethodsButton.Content = T("Назад", "Back");
-        ContinueButton.Content = T("Продолжить", "Continue");
-        ChooseAssetTitle.Text = T("Выберите криптовалюту", "Choose an asset");
-        ChooseAssetHint.Text = T("Сеть указана под названием каждой монеты.", "The network is shown under each asset.");
-        BackToAmountButton.Content = T("Назад", "Back");
-        OpenTelegramButton.Content = T("Открыть Telegram", "Open Telegram");
-        AddressLabel.Text = T("Адрес кошелька", "Wallet address");
-        CopyAddressButton.ToolTip = T("Копировать адрес", "Copy address");
-        AutomationProperties.SetName(CopyAddressButton, T("Копировать адрес кошелька", "Copy wallet address"));
-        WaitingText.Text = T("Ожидаем оплату", "Waiting for payment");
-        ThankYouTitle.Text = T("Спасибо за поддержку!", "Thank you for your support!");
+        AutomationProperties.SetName(CloseButton, T("Закрыть поддержку", "Close support", "关闭支持页面"));
+        Title = T("Поддержать Codex Swap Account", "Support Codex Swap Account", "支持 Codex Swap Account");
+        SupportTitle.Text = T("Поддержать Codex Swap Account", "Support Codex Swap Account", "支持 Codex Swap Account");
+        SupportSubtitle.Text = T("Приложение бесплатно и имеет открытый исходный код.", "The app is free and open source.", "本应用免费且开源。");
+        LoadingText.Text = T("Загрузка способов оплаты…", "Loading payment methods…", "正在加载支付方式…");
+        IntroText.Text = T("Если проект вам полезен, вы можете поддержать его развитие.", "If the project helps you, you can support its development.", "如果这个项目对你有帮助，你可以支持它的开发。");
+        TelegramMethodTitle.Text = T("Звёзды Telegram", "Telegram Stars", "Telegram 星标");
+        CryptoMethodTitle.Text = T("Криптовалюта", "Crypto", "加密货币");
+        ChooseAmountTitle.Text = T("Выберите сумму", "Choose amount", "选择金额");
+        TermsText.Text = T("Продолжая, вы принимаете условия добровольной поддержки.", "By continuing, you accept the voluntary support terms.", "继续即表示你接受自愿支持条款。");
+        TermsHint.Text = T("Поддержка не открывает платные функции и не включает регулярные платежи.", "Support does not unlock paid features or start recurring payments.", "支持不会解锁付费功能，也不会开启定期扣款。");
+        BackToMethodsButton.Content = T("Назад", "Back", "返回");
+        ContinueButton.Content = T("Продолжить", "Continue", "继续");
+        ChooseAssetTitle.Text = T("Выберите криптовалюту", "Choose an asset", "选择币种");
+        ChooseAssetHint.Text = T("Сеть указана под названием каждой монеты.", "The network is shown under each asset.", "网络显示在每个币种名称下方。");
+        BackToAmountButton.Content = T("Назад", "Back", "返回");
+        OpenTelegramButton.Content = T("Открыть Telegram", "Open Telegram", "打开 Telegram");
+        AddressLabel.Text = T("Адрес кошелька", "Wallet address", "钱包地址");
+        CopyAddressButton.ToolTip = T("Копировать адрес", "Copy address", "复制地址");
+        AutomationProperties.SetName(CopyAddressButton, T("Копировать адрес кошелька", "Copy wallet address", "复制钱包地址"));
+        WaitingText.Text = T("Ожидаем оплату", "Waiting for payment", "等待支付");
+        ThankYouTitle.Text = T("Спасибо за поддержку!", "Thank you for your support!", "感谢你的支持！");
         ThankYouText.Text = T(
             "Ваша поддержка помогает развивать Codex Swap Account и сохранять его бесплатным.",
-            "Your support helps keep Codex Swap Account free and moving forward.");
-        DoneButton.Content = T("Готово", "Done");
+            "Your support helps keep Codex Swap Account free and moving forward.",
+            "你的支持帮助 Codex Swap Account 保持免费并持续发展。");
+        DoneButton.Content = T("Готово", "Done", "完成");
     }
 
     internal async Task ApplyVisualQaStateAsync(string state)
@@ -198,7 +209,7 @@ public partial class SupportWindow : Window
                 break;
             case "assets":
                 _ = flow.SelectMethod("direct_crypto");
-                await flow.BeginCheckoutAsync(5, russian ? "ru" : "en");
+                await flow.BeginCheckoutAsync(5, CheckoutLocale);
                 RenderAssets();
                 ShowOnly(AssetPanel);
                 break;
@@ -232,7 +243,7 @@ public partial class SupportWindow : Window
                 ShowOnly(CheckoutPanel);
                 if (state.Equals("toast", StringComparison.OrdinalIgnoreCase))
                 {
-                    CopyToastText.Text = T("Адрес скопирован", "Address copied");
+                    CopyToastText.Text = T("Адрес скопирован", "Address copied", "地址已复制");
                     CopyToast.Visibility = Visibility.Visible;
                 }
 
@@ -243,8 +254,8 @@ public partial class SupportWindow : Window
                 break;
             case "error":
                 ShowTerminal(
-                    T("Срок платёжной сессии истёк", "This payment session expired"),
-                    T("Создайте новый платёж, чтобы продолжить.", "Create a new payment to continue."),
+                    T("Срок платёжной сессии истёк", "This payment session expired", "支付会话已过期"),
+                    T("Создайте новый платёж, чтобы продолжить.", "Create a new payment to continue.", "请创建新的支付以继续。"),
                     canCreateNew: true);
                 break;
         }
@@ -295,7 +306,7 @@ public partial class SupportWindow : Window
                 ClearCheckoutVisuals();
                 ShowOnly(AmountPanel);
                 SetAmountControlsEnabled(false);
-                ContinueButton.Content = T("Создание платежа…", "Creating payment…");
+                ContinueButton.Content = T("Создание платежа…", "Creating payment…", "正在创建支付…");
                 break;
             case SupportFlowState.Waiting:
             case SupportFlowState.ConnectivityIssue:
@@ -304,8 +315,8 @@ public partial class SupportWindow : Window
                     RenderCheckout(checkout);
                     ShowOnly(CheckoutPanel);
                     WaitingText.Text = flow.State == SupportFlowState.ConnectivityIssue
-                        ? T("Связь прервана. Повторяем попытку…", "Connection interrupted. Retrying…")
-                        : T("Ожидаем оплату", "Waiting for payment");
+                        ? T("Связь прервана. Повторяем попытку…", "Connection interrupted. Retrying…", "连接中断，正在重试…")
+                        : T("Ожидаем оплату", "Waiting for payment", "等待支付");
                 }
 
                 break;
@@ -316,14 +327,14 @@ public partial class SupportWindow : Window
                 break;
             case SupportFlowState.Expired:
                 ShowTerminal(
-                    T("Срок платёжной сессии истёк", "This payment session expired"),
-                    T("Создайте новый платёж, чтобы продолжить.", "Create a new payment to continue."),
+                    T("Срок платёжной сессии истёк", "This payment session expired", "支付会话已过期"),
+                    T("Создайте новый платёж, чтобы продолжить.", "Create a new payment to continue.", "请创建新的支付以继续。"),
                     canCreateNew: true);
                 break;
             case SupportFlowState.Refunded:
                 ShowTerminal(
-                    T("Платёж возвращён", "This payment was refunded"),
-                    T("Эта платёжная сессия завершена.", "This payment session is complete."),
+                    T("Платёж возвращён", "This payment was refunded", "这笔支付已退款"),
+                    T("Эта платёжная сессия завершена.", "This payment session is complete.", "此支付会话已结束。"),
                     canCreateNew: true);
                 break;
             case SupportFlowState.Failed:
@@ -340,12 +351,12 @@ public partial class SupportWindow : Window
             string.Equals(item.Id, "direct_crypto", StringComparison.OrdinalIgnoreCase));
         TelegramMethodButton.IsEnabled = stars?.Enabled == true;
         TelegramMethodHint.Text = stars?.Enabled == true
-            ? T("Быстрая оплата в Telegram", "Fast checkout in Telegram")
-            : T("Сейчас недоступно", "Currently unavailable");
+            ? T("Быстрая оплата в Telegram", "Fast checkout in Telegram", "在 Telegram 中快速支付")
+            : T("Сейчас недоступно", "Currently unavailable", "暂不可用");
         CryptoMethodButton.IsEnabled = crypto?.Enabled == true;
         CryptoMethodHint.Text = crypto?.Enabled == true
-            ? T("Оплата из криптокошелька", "Pay from a crypto wallet")
-            : T("Сейчас недоступно", "Currently unavailable");
+            ? T("Оплата из криптокошелька", "Pay from a crypto wallet", "使用加密钱包支付")
+            : T("Сейчас недоступно", "Currently unavailable", "暂不可用");
     }
 
     private void RenderAmounts()
@@ -356,12 +367,12 @@ public partial class SupportWindow : Window
         }
 
         SetAmountControlsEnabled(true);
-        ContinueButton.Content = T("Продолжить", "Continue");
+        ContinueButton.Content = T("Продолжить", "Continue", "继续");
         AmountSuffixText.Content = IsCrypto(method.Id) ? new TextBlock { Text = "$" } : SupportIcons.Vector(SupportIcons.Star, new SolidColorBrush(Color.FromRgb(245, 184, 46)), 20);
         string range = method.Custom.Max is { } maximum
             ? $"{method.Custom.Min:N0}–{maximum:N0} {method.Currency}"
             : $"≥ {method.Custom.Min:N0} {method.Currency}";
-        CustomAmountLabel.Text = T($"Своя сумма ({range})", $"Custom amount ({range})");
+        CustomAmountLabel.Text = T($"Своя сумма ({range})", $"Custom amount ({range})", $"自定义金额（{range}）");
         CustomAmountTextBox.IsEnabled = method.Custom.Enabled;
         PresetPanel.Children.Clear();
         foreach (int amount in method.Presets)
@@ -525,7 +536,7 @@ public partial class SupportWindow : Window
 
         AmountValidationText.Text = !hasInput || valid
             ? string.Empty
-            : T("Введите допустимую сумму числом.", "Enter a valid numeric amount.");
+            : T("Введите допустимую сумму числом.", "Enter a valid numeric amount.", "请输入有效的数字金额。");
         ContinueButton.IsEnabled = valid && TermsCheckBox.IsChecked == true && method.Enabled;
         if (valid)
         {
@@ -563,7 +574,7 @@ public partial class SupportWindow : Window
 
         await flow.BeginCheckoutAsync(
             amount,
-            russian ? "ru" : "en",
+            CheckoutLocale,
             dialogCancellation?.Token ?? default);
     }
 
@@ -586,8 +597,8 @@ public partial class SupportWindow : Window
                 string.Equals(item.Network, checkout.Network, StringComparison.OrdinalIgnoreCase))
             : null;
         CheckoutMethodText.Text = crypto
-            ? selectedAsset?.DisplayName ?? checkout.Asset ?? T("Криптовалюта", "Crypto")
-            : T("Звёзды Telegram", "Telegram Stars");
+            ? selectedAsset?.DisplayName ?? checkout.Asset ?? T("Криптовалюта", "Crypto", "加密货币")
+            : T("Звёзды Telegram", "Telegram Stars", "Telegram 星标");
         CheckoutAmountText.Text = crypto
             ? checkout.CryptoAmount ?? string.Empty
             : checkout.Amount.ToString("N0", AmountCulture);
@@ -598,13 +609,14 @@ public partial class SupportWindow : Window
         OpenTelegramButton.IsEnabled = !crypto;
         CryptoDetailsPanel.Visibility = crypto ? Visibility.Visible : Visibility.Collapsed;
         ScanText.Text = crypto
-            ? T("QR содержит адрес кошелька. Отправьте точную сумму, указанную выше.", "The QR contains the wallet address. Send the exact amount shown above.")
-            : T("Отсканируйте телефоном или откройте Telegram", "Scan with your phone or open Telegram");
+            ? T("QR содержит адрес кошелька. Отправьте точную сумму, указанную выше.", "The QR contains the wallet address. Send the exact amount shown above.", "二维码包含钱包地址。请发送上方显示的准确金额。")
+            : T("Отсканируйте телефоном или откройте Telegram", "Scan with your phone or open Telegram", "用手机扫描，或打开 Telegram");
         AddressText.Text = checkout.WalletAddress ?? string.Empty;
         AddressText.ToolTip = checkout.WalletAddress;
         NetworkWarningText.Text = T(
             $"Сеть: {checkout.NetworkName ?? checkout.Network}. Отправляйте средства только в этой сети.",
-            $"Network: {checkout.NetworkName ?? checkout.Network}. Send funds only on this network.");
+            $"Network: {checkout.NetworkName ?? checkout.Network}. Send funds only on this network.",
+            $"网络：{checkout.NetworkName ?? checkout.Network}。请仅在此网络上发送资金。");
 
         string? qrPayload = crypto ? checkout.WalletAddress : checkout.CheckoutUrl;
         if (string.IsNullOrWhiteSpace(qrPayload) || string.Equals(renderedQrPayload, qrPayload, StringComparison.Ordinal))
@@ -638,8 +650,8 @@ public partial class SupportWindow : Window
             !CheckoutUrlValidator.TryValidateTelegramCheckout(checkout.CheckoutUrl, out _))
         {
             ShowTerminal(
-                T("Не удалось открыть оплату", "Could not open checkout"),
-                T("Сервис вернул небезопасную ссылку.", "The service returned an unsafe checkout link."),
+                T("Не удалось открыть оплату", "Could not open checkout", "无法打开支付页面"),
+                T("Сервис вернул небезопасную ссылку.", "The service returned an unsafe checkout link.", "服务返回了不安全的支付链接。"),
                 canCreateNew: true);
             return;
         }
@@ -651,8 +663,8 @@ public partial class SupportWindow : Window
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
             ShowTerminal(
-                T("Не удалось открыть Telegram", "Could not open Telegram"),
-                T("Повторите попытку позже.", "Please try again later."),
+                T("Не удалось открыть Telegram", "Could not open Telegram", "无法打开 Telegram"),
+                T("Повторите попытку позже.", "Please try again later.", "请稍后再试。"),
                 canCreateNew: true);
         }
     }
@@ -667,7 +679,7 @@ public partial class SupportWindow : Window
         try
         {
             Clipboard.SetText(address);
-            await ShowCopyToastAsync(T("Адрес скопирован", "Address copied"));
+            await ShowCopyToastAsync(T("Адрес скопирован", "Address copied", "地址已复制"));
         }
         catch (ExternalException)
         {
@@ -704,16 +716,16 @@ public partial class SupportWindow : Window
         string text = code switch
         {
             "PROVIDER_NOT_CONFIGURED" or "METHOD_UNAVAILABLE" =>
-                T("Этот способ оплаты сейчас недоступен.", "This payment method is currently unavailable."),
+                T("Этот способ оплаты сейчас недоступен.", "This payment method is currently unavailable.", "此支付方式当前不可用。"),
             "UNSAFE_CHECKOUT_URL" =>
-                T("Сервис вернул небезопасную ссылку. Оплата не была открыта.", "The service returned an unsafe link. Checkout was not opened."),
+                T("Сервис вернул небезопасную ссылку. Оплата не была открыта.", "The service returned an unsafe link. Checkout was not opened.", "服务返回了不安全的链接，支付页面未打开。"),
             "NETWORK_UNAVAILABLE" or "NETWORK_TIMEOUT" =>
-                T("Не удалось подключиться к сервису поддержки.", "Could not connect to the support service."),
+                T("Не удалось подключиться к сервису поддержки.", "Could not connect to the support service.", "无法连接到支持服务。"),
             "PAYMENT_NOT_FOUND" =>
-                T("Платёжная сессия больше недоступна.", "The payment session is no longer available."),
-            _ => T("Не удалось продолжить платёж. Попробуйте ещё раз позже.", "Could not continue the payment. Please try again later."),
+                T("Платёжная сессия больше недоступна.", "The payment session is no longer available.", "支付会话已失效。"),
+            _ => T("Не удалось продолжить платёж. Попробуйте ещё раз позже.", "Could not continue the payment. Please try again later.", "无法继续支付，请稍后再试。"),
         };
-        ShowTerminal(T("Что-то пошло не так", "Something went wrong"), text, flow?.Method is not null);
+        ShowTerminal(T("Что-то пошло не так", "Something went wrong", "出错了"), text, flow?.Method is not null);
     }
 
     private void ShowTerminal(string title, string text, bool canCreateNew)
@@ -722,8 +734,8 @@ public partial class SupportWindow : Window
         TerminalText.Text = text;
         CreateNewButton.Visibility = canCreateNew ? Visibility.Visible : Visibility.Collapsed;
         CreateNewButton.Content = flow?.Method is null
-            ? T("Повторить", "Retry")
-            : T("Создать новый платёж", "Create new payment");
+            ? T("Повторить", "Retry", "重试")
+            : T("Создать новый платёж", "Create new payment", "创建新的支付");
         ShowOnly(TerminalPanel);
         if (canCreateNew)
         {

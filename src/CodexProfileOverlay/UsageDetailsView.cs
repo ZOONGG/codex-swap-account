@@ -21,8 +21,13 @@ internal static class UsageDetailsView
         Text(name, true);
         if (recommended) Text(localizer["RecommendedProfile"]);
         var now = DateTimeOffset.UtcNow;
-        bool russian = LocalizationCatalog.Resolve(settings.Language) == LanguagePreference.Russian;
-        var culture = CultureInfo.GetCultureInfo(russian ? "ru-RU" : "en-US");
+        LanguagePreference language = LocalizationCatalog.Resolve(settings.Language);
+        var culture = CultureInfo.GetCultureInfo(language switch
+        {
+            LanguagePreference.Russian => "ru-RU",
+            LanguagePreference.Chinese => "zh-CN",
+            _ => "en-US",
+        });
         if (snapshot is null || UsageIntelligence.GetKnownWindows(snapshot).Count == 0) Text(localizer["NoReliableUsageData"]);
         if (snapshot is not null)
         {
@@ -36,15 +41,15 @@ internal static class UsageDetailsView
                     Height = 5, Margin = new Thickness(0, 0, 0, 8), Focusable = false });
                 if (window.ResetAt is { } reset)
                 {
-                    Text(UsageDisplayFormatter.Countdown(reset, now, russian));
+                    Text(UsageDisplayFormatter.Countdown(reset, now, language));
                     Text($"{localizer["ResetsAt"]}: {UsageDisplayFormatter.FormatLocal(reset, culture)}");
                 }
             }
-            Text($"{localizer["LastUpdated"]}: {UsageDisplayFormatter.UpdatedAgo(snapshot.CapturedAt, now, russian)}");
+            Text($"{localizer["LastUpdated"]}: {UsageDisplayFormatter.UpdatedAgo(snapshot.CapturedAt, now, language)}");
             Text(UsageDisplayFormatter.FormatLocal(snapshot.CapturedAt, culture));
             if (UsageIntelligence.IsStale(snapshot, now, TimeSpan.FromMinutes(settings.StaleDataThresholdMinutes))) Text(localizer["UsageDataStale"]);
         }
-        if (!string.IsNullOrWhiteSpace(error)) Text(localizer["RefreshError"] + ": " + UsageDisplayFormatter.RefreshError(error, russian));
+        if (!string.IsNullOrWhiteSpace(error)) Text(localizer["RefreshError"] + ": " + UsageDisplayFormatter.RefreshError(error, language));
         var button = new Button { Content = localizer["RefreshNow"], HorizontalAlignment = HorizontalAlignment.Left };
         button.Click += async (_, _) => {
             button.IsEnabled = false;

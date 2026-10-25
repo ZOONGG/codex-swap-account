@@ -175,6 +175,55 @@ public sealed class CodexShutdownCoordinatorTests
         Assert.Empty(session.Killed);
     }
 
+    [Fact]
+    public async Task VanishingProcessDuringGracefulCloseDoesNotAbortShutdown()
+    {
+        var clock = new FakeClock();
+        var session = new FakeSession(clock, elapsed => elapsed < TimeSpan.FromMilliseconds(300) ? [10] : [])
+        {
+            CloseFailure = new ArgumentException("Process with an Id of 10 is not running."),
+        };
+        bool cleaned = false;
+        await new CodexShutdownCoordinator(clock).CloseAsync(session, TimeSpan.FromSeconds(1), false,
+            () => cleaned = true, () => { });
+        Assert.True(cleaned);
+        Assert.NotEmpty(session.Closed);
+    }
+
+    [Fact]
+    public async Task VanishingProcessDuringForceCloseDoesNotAbortShutdown()
+    {
+        var clock = new FakeClock();
+        var session = new FakeSession(clock, _ => [10])
+        {
+            KillFailure = new System.ComponentModel.Win32Exception(0), // "operation completed successfully"
+        };
+        session.KillExits = true;
+        bool cleaned = false;
+        await new CodexShutdownCoordinator(clock).CloseAsync(session, TimeSpan.FromSeconds(1), true,
+            () => cleaned = true, () => { });
+        Assert.NotEmpty(session.Killed);
+        Assert.True(cleaned);
+    }
+
+    [Fact]
+    public async Task FailedCloseOfSurvivingProcessStillPreventsAuthReplacement()
+    {
+        using var temp = new TestLayout();
+        temp.AddProfile("target", "target-auth");
+        temp.WriteSharedAuth("unchanged-auth");
+        var clock = new FakeClock();
+        var session = new FakeSession(clock, _ => [10])
+        {
+            CloseFailure = new System.ComponentModel.Win32Exception(5),
+        };
+        bool cleaned = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new CodexShutdownCoordinator(clock).CloseAsync(
+            session, TimeSpan.FromSeconds(1), false, () => cleaned = true, () => { }));
+        Assert.False(cleaned);
+        Assert.Equal("unchanged-auth", temp.ReadSharedAuth());
+    }
+
     private sealed class FakeClock : IShutdownClock
     {
         public TimeSpan Elapsed { get; private set; }
@@ -196,6 +245,8 @@ public sealed class CodexShutdownCoordinatorTests
         public bool Respawn { get; set; }
         public TimeSpan? FirstKillAt { get; private set; }
         public Action<int>? OnSnapshot { get; set; }
+        public Exception? CloseFailure { get; set; }
+        public Exception? KillFailure { get; set; }
         public List<int> Closed { get; } = [];
         public List<int> Killed { get; } = [];
         public IReadOnlyList<int> FindRunning()
@@ -203,7 +254,16 @@ public sealed class CodexShutdownCoordinatorTests
             OnSnapshot?.Invoke(++snapshotCount);
             return Respawn ? [20] : KillExits && Killed.Count > 0 ? [] : snapshot(clock.Elapsed);
         }
-        public void RequestClose(int processId) => Closed.Add(processId);
-        public void Terminate(int processId) { FirstKillAt ??= clock.Elapsed; Killed.Add(processId); }
+        public void RequestClose(int processId)
+        {
+            Closed.Add(processId);
+            if (CloseFailure is not null) throw CloseFailure;
+        }
+        public void Terminate(int processId)
+        {
+            FirstKillAt ??= clock.Elapsed;
+            Killed.Add(processId);
+            if (KillFailure is not null) throw KillFailure;
+        }
     }
 }

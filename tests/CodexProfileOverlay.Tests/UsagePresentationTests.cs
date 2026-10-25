@@ -19,15 +19,16 @@ public sealed class UsagePresentationTests
         Assert.Equal(expected, UsageDisplayFormatter.TrayPercent(Snapshot(), mode, Now, TimeSpan.FromMinutes(90)));
 
     [Theory]
-    [InlineData(false, "Just now", "2m ago", "In less than a minute", "Usage refresh timed out")]
-    [InlineData(true, "Только что", "2 мин назад", "Менее чем через минуту", "Время ожидания обновления истекло")]
-    public void Details_LocalizeAgeShortCountdownAndErrors(bool russian, string recent, string minutes, string countdown, string timeout)
+    [InlineData(LanguagePreference.English, "Just now", "2m ago", "In less than a minute", "Usage refresh timed out")]
+    [InlineData(LanguagePreference.Russian, "Только что", "2 мин назад", "Менее чем через минуту", "Время ожидания обновления истекло")]
+    [InlineData(LanguagePreference.Chinese, "刚刚", "2 分钟前", "不到 1 分钟后", "额度刷新超时")]
+    public void Details_LocalizeAgeShortCountdownAndErrors(LanguagePreference language, string recent, string minutes, string countdown, string timeout)
     {
-        Assert.Equal(recent, UsageDisplayFormatter.UpdatedAgo(Now.AddSeconds(5), Now, russian));
-        Assert.Equal(minutes, UsageDisplayFormatter.UpdatedAgo(Now.AddMinutes(-2), Now, russian));
-        Assert.Equal(countdown, UsageDisplayFormatter.Countdown(Now.AddSeconds(30), Now, russian));
-        Assert.Equal(timeout, UsageDisplayFormatter.RefreshError("Usage refresh timed out", russian));
-        Assert.DoesNotContain("private-provider-detail", UsageDisplayFormatter.RefreshError("private-provider-detail", russian));
+        Assert.Equal(recent, UsageDisplayFormatter.UpdatedAgo(Now.AddSeconds(5), Now, language));
+        Assert.Equal(minutes, UsageDisplayFormatter.UpdatedAgo(Now.AddMinutes(-2), Now, language));
+        Assert.Equal(countdown, UsageDisplayFormatter.Countdown(Now.AddSeconds(30), Now, language));
+        Assert.Equal(timeout, UsageDisplayFormatter.RefreshError("Usage refresh timed out", language));
+        Assert.DoesNotContain("private-provider-detail", UsageDisplayFormatter.RefreshError("private-provider-detail", language));
     }
 
     [Fact]
@@ -46,13 +47,14 @@ public sealed class UsagePresentationTests
     }
 
     [Theory]
-    [InlineData(false, "In 2h 35m", "In 3d 0h", "Awaiting refresh")]
-    [InlineData(true, "Через 2 ч 35 мин", "Через 3 д 0 ч", "Ожидается обновление")]
-    public void Countdown_IsLocalizedAndNeverNegative(bool russian, string hours, string days, string expired)
+    [InlineData(LanguagePreference.English, "In 2h 35m", "In 3d 0h", "Awaiting refresh")]
+    [InlineData(LanguagePreference.Russian, "Через 2 ч 35 мин", "Через 3 д 0 ч", "Ожидается обновление")]
+    [InlineData(LanguagePreference.Chinese, "2 小时 35 分后", "3 天 0 小时后", "等待刷新")]
+    public void Countdown_IsLocalizedAndNeverNegative(LanguagePreference language, string hours, string days, string expired)
     {
-        Assert.Equal(hours, UsageDisplayFormatter.Countdown(Now.AddMinutes(155), Now, russian));
-        Assert.Equal(days, UsageDisplayFormatter.Countdown(Now.AddDays(3), Now, russian));
-        Assert.Equal(expired, UsageDisplayFormatter.Countdown(Now.AddMinutes(-1), Now, russian));
+        Assert.Equal(hours, UsageDisplayFormatter.Countdown(Now.AddMinutes(155), Now, language));
+        Assert.Equal(days, UsageDisplayFormatter.Countdown(Now.AddDays(3), Now, language));
+        Assert.Equal(expired, UsageDisplayFormatter.Countdown(Now.AddMinutes(-1), Now, language));
     }
 
     [Fact]
@@ -63,6 +65,7 @@ public sealed class UsagePresentationTests
         {
             Assert.NotEqual(key, LocalizationCatalog.Text(LanguagePreference.English, key));
             Assert.NotEqual(key, LocalizationCatalog.Text(LanguagePreference.Russian, key));
+            Assert.NotEqual(key, LocalizationCatalog.Text(LanguagePreference.Chinese, key));
         }
     }
 }

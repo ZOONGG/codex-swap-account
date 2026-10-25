@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Xml.Linq;
 using Microsoft.Win32.SafeHandles;
 using CodexProfileOverlay.Core.Services;
@@ -25,14 +26,42 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
             && !family.Equals(OfficialCodexDesktopIdentity.PackageFamily, StringComparison.OrdinalIgnoreCase)));
     public IReadOnlyList<DesktopProcessEntry> Snapshot()
     {
+        // The process table changes constantly; toolhelp enumeration can fail transiently
+        // (ERROR_BAD_LENGTH, a stale handle, or no error captured at all). A single hiccup must
+        // not abort an account switch, so retry a few times before giving up.
+        Win32Exception? lastError = null;
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            try { return SnapshotOnce(); }
+            catch (Win32Exception exception) when (IsTransientSnapshotError(exception.NativeErrorCode))
+            {
+                lastError = exception;
+                Thread.Sleep(10 * (attempt + 1));
+            }
+        }
+
+        throw lastError!;
+    }
+
+    private static bool IsTransientSnapshotError(int error) => error is 0 or 6 or 24; // none, invalid handle, bad length
+
+    private static IReadOnlyList<DesktopProcessEntry> SnapshotOnce()
+    {
         using SafeFileHandle snapshot = CreateToolhelp32Snapshot(2, 0);
         if (snapshot.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
         var entry = new ProcessEntry { Size = (uint)Marshal.SizeOf<ProcessEntry>(), ExeFile = "" };
         var result = new List<DesktopProcessEntry>();
-        if (!Process32First(snapshot, ref entry)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (!Process32First(snapshot, ref entry))
+        {
+            int firstError = Marshal.GetLastWin32Error();
+            if (firstError == 18) return result; // ERROR_NO_MORE_FILES: empty snapshot.
+            throw new Win32Exception(firstError);
+        }
+
         do { result.Add(new((int)entry.ProcessId, (int)entry.ParentProcessId, entry.ExeFile)); }
         while (Process32Next(snapshot, ref entry));
-        if (Marshal.GetLastWin32Error() != 18) throw new Win32Exception(Marshal.GetLastWin32Error());
+        int error = Marshal.GetLastWin32Error();
+        if (error != 18) throw new Win32Exception(error);
         return result;
     }
 
@@ -69,9 +98,13 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
             {
                 uint wait = WaitForSingleObject(handle, 0);
                 if (wait == 258) return null; // WAIT_TIMEOUT: exit is not complete yet.
-                if (wait != 0) throw new Win32Exception(Marshal.GetLastWin32Error());
-                if (!GetProcessTimes(handle, out _, out long exit, out _, out _)) throw new Win32Exception(Marshal.GetLastWin32Error());
-                return DateTimeOffset.FromFileTime(exit);
+                if (wait == 0 && GetProcessTimes(handle, out _, out long exit, out _, out _))
+                    return DateTimeOffset.FromFileTime(exit);
+                // The wait failed or the timestamp could not be read. Fall back to the exit code
+                // instead of surfacing a bare "operation completed successfully" (error 0) that
+                // aborts an account switch for no reason.
+                if (!GetExitCodeProcess(handle, out uint code) || code == 259) return null; // STILL_ACTIVE
+                return DateTimeOffset.UtcNow;
             }
         }
 
@@ -121,9 +154,9 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
                 using var process = Process.GetProcessById(Id);
                 _ = process.CloseMainWindow();
             }
-            catch (Exception exception) when ((exception is ArgumentException or InvalidOperationException or Win32Exception)
-                && ExitedAt is not null)
-            { }
+            catch (ArgumentException) { } // Exited between the probe and the lookup: nothing to close.
+            catch (InvalidOperationException) { }
+            catch (Win32Exception) when (ExitedAt is not null) { }
         }
 
         public void Terminate()
@@ -133,12 +166,20 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
             if (terminateHandle.IsInvalid)
             {
                 if (ExitedAt is not null) return;
-                throw new Win32Exception(Marshal.GetLastWin32Error());
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not open the Codex process for termination.");
             }
             if (!GetProcessTimes(terminateHandle, out long created, out _, out _, out _)
                 || DateTimeOffset.FromFileTime(created) != StartedAt)
                 throw new InvalidOperationException("Process identity changed during shutdown.");
-            if (!TerminateProcess(terminateHandle, 1) && ExitedAt is null) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (!TerminateProcess(terminateHandle, 1))
+            {
+                int error = Marshal.GetLastWin32Error();
+                // A process that is already terminating rejects termination; give it a moment to
+                // signal the retained handle before reporting a failure.
+                if (ExitedAt is not null) return;
+                if (WaitForSingleObject(handle, 250) == 0) return;
+                throw new Win32Exception(error, "Could not terminate the Codex process.");
+            }
         }
 
         public void Dispose() => handle.Dispose();
@@ -150,7 +191,8 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
         uint length = 0;
         int result = reader(handle, ref length, null);
         if (result == 15700) return null; // APPMODEL_ERROR_NO_PACKAGE
-        if (result != 122) throw new Win32Exception(result);
+        if (result == 0) return null; // Reported success without data: treat as unpackaged.
+        if (result != 122) throw new Win32Exception(result, "Could not read the Codex package identity.");
         var buffer = new StringBuilder((int)length);
         result = reader(handle, ref length, buffer);
         if (result != 0) throw new Win32Exception(result);
@@ -190,4 +232,6 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
     [return: MarshalAs(UnmanagedType.Bool)] private static extern bool TerminateProcess(SafeProcessHandle process, uint exitCode);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint WaitForSingleObject(SafeProcessHandle handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint exitCode);
 }

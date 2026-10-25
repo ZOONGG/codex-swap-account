@@ -41,6 +41,31 @@ public sealed class WindowsDesktopAdapterTests
     }
 
     [Fact]
+    [SupportedOSPlatform("windows")]
+    public void ClosingAnAlreadyExitedProcessIsANoOp()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "cmd.exe", "/c ping -n 20 127.0.0.1 > nul")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false,
+        })!;
+        using var handle = new WindowsDesktopProcessCatalog().Open(child.Id);
+        Assert.NotNull(handle);
+        child.Kill();
+        child.WaitForExit(5000);
+
+        // The exit signal and the "not running" lookup are not atomic; a switch must never
+        // fail because the process disappeared between the probe and the close request.
+        for (int attempt = 0; attempt < 50; attempt++)
+        {
+            _ = handle.ExitedAt;
+            handle.RequestClose();
+        }
+    }
+
+    [Fact]
     public void NativeTrayAdapterRejectsUnrelatedGuidBeforeCallingShell()
     {
         var api = new WindowsTrayRegistration();

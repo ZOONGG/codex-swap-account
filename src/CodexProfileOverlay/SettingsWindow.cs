@@ -373,10 +373,8 @@ internal sealed class SettingsWindow : Window
         if (supportButton is not null)
         {
             supportButton.Content = SupportIcons.Vector(SupportIcons.Heart, Brush("ErrorBrush"), 18);
-            System.Windows.Automation.AutomationProperties.SetName(supportButton, LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "Поддержать" : "Support");
-            supportButton.ToolTip = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian
-                ? "Поддержать развитие Codex Swap Account"
-                : "Support Codex Swap Account development";
+            System.Windows.Automation.AutomationProperties.SetName(supportButton, localizer["Support"]);
+            supportButton.ToolTip = localizer["SupportDevelopment"];
         }
     }
 
@@ -1552,6 +1550,7 @@ internal sealed class SettingsWindow : Window
             LanguagePreference.SystemDefault => localizer["SystemDefault"],
             LanguagePreference.English => localizer["English"],
             LanguagePreference.Russian => localizer["Russian"],
+            LanguagePreference.Chinese => localizer["Chinese"],
             PositionPreset.AfterMenu => localizer["AfterMenu"],
             PositionPreset.TopCenter => localizer["TopCenter"],
             PositionPreset.TopRight => localizer["TopRight"],

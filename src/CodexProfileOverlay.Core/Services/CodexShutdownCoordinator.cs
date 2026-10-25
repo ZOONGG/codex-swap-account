@@ -81,8 +81,16 @@ public sealed class CodexShutdownCoordinator
                 foreach (int id in running)
                 {
                     token.ThrowIfCancellationRequested();
-                    if (force) session.Terminate(id);
-                    else session.RequestClose(id);
+                    // A process can exit between enumeration and the close/terminate request, and
+                    // Windows then reports "not running" or a bare zero error. That is a normal
+                    // race, not an authorization hazard: VerifyStopped() re-checks the process
+                    // table before any credential change, so the request itself stays best-effort.
+                    try
+                    {
+                        if (force) session.Terminate(id);
+                        else session.RequestClose(id);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException) { }
                 }
             }
             if (clock.Elapsed >= deadline) return false;
