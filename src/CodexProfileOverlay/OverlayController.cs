@@ -293,7 +293,9 @@ internal sealed class OverlayController : IDisposable
         trayIcon?.UpdateOverlayState(false);
     }
 
-    private void RefreshProfiles()
+    private void RefreshProfiles() => TryRefreshProfiles();
+
+    private bool TryRefreshProfiles()
     {
         try
         {
@@ -307,11 +309,15 @@ internal sealed class OverlayController : IDisposable
             profileManagerWindow?.UpdateProfiles(profiles, activeProfile);
 
             RefreshStatusIndicators();
+            return true;
         }
         catch (Exception exception)
         {
-            logger.Error("Profile refresh failed.", exception);
+            try { logger.Error("Profile refresh failed.", exception); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
             overlayWindow?.ShowError(localizer["CouldNotRefreshProfiles"]);
+            return false;
         }
     }
 
@@ -682,28 +688,45 @@ internal sealed class OverlayController : IDisposable
 
     private void RemoveProfile(ProfileInfo profile)
     {
-        if (installingUpdate || accountOperation) return;
-        if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
+        if (installingUpdate || accountOperation || switching) return;
+        accountOperation = true;
+        try
         {
-            overlayWindow?.ShowError(localizer["ActiveProfileCannotRename"]);
-            return;
+            if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
+            {
+                ShowRemovalError(localizer["ActiveProfileCannotRemove"]);
+                return;
+            }
+            Window? owner = PromptOwner();
+            if (!ConfirmDialog.Show(owner, owner is null ? CurrentCodexWindowHandle() : IntPtr.Zero,
+                localizer["Remove"], localizer["RemoveProfilePrompt"], localizer["Remove"], localizer["Cancel"], danger: true))
+                return;
+            // Re-read after the modal dispatcher loop.
+            profileManager.RemoveProfile(profile.Name, activeProfileStore.Read());
+            if (!TryRefreshProfiles())
+            {
+                ShowRemovalError(localizer["CouldNotRefreshProfiles"]);
+                return;
+            }
+            overlayWindow?.ShowNotification(localizer["ProfileRemoved"]);
         }
-
-        if (!ConfirmDialog.Show(
-            profileManagerWindow,
-            profileManagerWindow is null ? CurrentCodexWindowHandle() : IntPtr.Zero,
-            localizer["Remove"],
-            localizer["RemoveProfilePrompt"],
-            localizer["Remove"],
-            localizer["Cancel"],
-            danger: true))
+        catch (Exception exception)
         {
-            return;
+            // No paths or parsed metadata in removal diagnostics.
+            try { logger.Info($"Profile removal failed: {exception.GetType().Name}, HRESULT=0x{exception.HResult:X8}."); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            RefreshProfiles();
+            ShowRemovalError(localizer["CouldNotRemoveProfile"]);
         }
+        finally { accountOperation = false; }
+    }
 
-        profileManager.RemoveProfile(profile.Name, activeProfileStore.Read());
-        RefreshProfiles();
-        overlayWindow?.ShowNotification(localizer["ProfileRemoved"]);
+    private void ShowRemovalError(string message)
+    {
+        Window? owner = PromptOwner();
+        if (owner is not null) System.Windows.MessageBox.Show(owner, message, localizer["Remove"], MessageBoxButton.OK, MessageBoxImage.Warning);
+        else System.Windows.MessageBox.Show(message, localizer["Remove"], MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private void ReorderProfiles(IReadOnlyList<string> orderedNames)

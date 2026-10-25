@@ -184,20 +184,61 @@ public sealed class ProfileManagerService
             throw new DirectoryNotFoundException("Profile directory was not found.");
         }
 
+        ProfileMetadataDocument document = metadataStore.Load();
         Directory.CreateDirectory(paths.RemovedProfilesDirectory);
         string destination = Path.Combine(
             paths.RemovedProfilesDirectory,
-            $"{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{validName}");
-        Directory.Move(source, destination);
-
-        ProfileMetadataDocument document = metadataStore.Load();
-        foreach (ProfileMetadata item in document.Profiles.Where(item => string.Equals(item.DirectoryName, validName, StringComparison.OrdinalIgnoreCase)))
+            $"{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{validName}-{Guid.NewGuid():N}");
+        string movedSource = destination;
+        try { Directory.Move(source, destination); }
+        catch (IOException)
         {
-            item.Hidden = true;
+            // Directory.Move cannot cross volumes (including a profiles-root junction).
+            // Copy completely before atomically detaching the source on its own volume.
+            CopyRecoveryDirectory(source, destination);
+            // Leading space makes this private staging name invalid to ProfileName/discovery.
+            movedSource = Path.Combine(paths.ProfilesDirectory, " .removed-" + Guid.NewGuid().ToString("N"));
+            Directory.Move(source, movedSource);
         }
 
-        metadataStore.Save(document);
+        try
+        {
+            foreach (ProfileMetadata item in document.Profiles.Where(item => string.Equals(item.DirectoryName, validName, StringComparison.OrdinalIgnoreCase)))
+            {
+                item.Hidden = true;
+            }
+
+            metadataStore.Save(document);
+        }
+        catch
+        {
+            Directory.Move(movedSource, source);
+            throw;
+        }
+        if (movedSource != destination)
+        {
+            // Committed recovery is complete. Retain an extra staging copy if locked.
+            try { Directory.Delete(movedSource, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
         return destination;
+    }
+
+    private static void CopyRecoveryDirectory(string source, string destination)
+    {
+        if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("Cannot archive profile links; the original is preserved.");
+        Directory.CreateDirectory(destination);
+        foreach (string entry in Directory.EnumerateFileSystemEntries(source))
+        {
+            FileAttributes attributes = File.GetAttributes(entry);
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Cannot archive profile links; the original is preserved.");
+            string target = Path.Combine(destination, Path.GetFileName(entry));
+            if ((attributes & FileAttributes.Directory) != 0) CopyRecoveryDirectory(entry, target);
+            else File.Copy(entry, target, overwrite: false);
+        }
     }
 
     public void Reorder(IReadOnlyList<string> orderedDirectoryNames)

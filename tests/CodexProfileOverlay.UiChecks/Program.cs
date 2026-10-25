@@ -65,6 +65,7 @@ internal static class Program
         Directory.CreateDirectory(temp);
         try
         {
+            if (args.Contains("--removal-only")) { CheckRemoval(temp); return; }
             if (args.Contains("--login-only")) { CheckLoginRuntime(temp); return; }
             if (args.Contains("--dialogs-only"))
                 foreach (var screen in System.Windows.Forms.Screen.AllScreens)
@@ -90,6 +91,134 @@ internal static class Program
             Console.WriteLine("PASS: Update card portable/installed/ready/progress; hover/bottom popup; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto input; dark/light and EN/RU/ZH.");
         }
         finally { app.Shutdown(); Directory.Delete(temp, true); }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetActiveWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
+    private static void CheckRemoval(string temp)
+    {
+        var assembly = typeof(App).Assembly;
+        var paths = new AppPaths(temp, temp);
+        Directory.CreateDirectory(paths.ProfilesDirectory);
+        foreach (string name in new[] { "current", "old" })
+        {
+            Directory.CreateDirectory(Path.Combine(paths.ProfilesDirectory, name));
+            File.WriteAllText(Path.Combine(paths.ProfilesDirectory, name, "auth.json"), "FAKE TEST AUTH");
+        }
+        var service = new ProfileManagerService(paths, new ProfileDiscoveryService(paths.ProfilesDirectory), new ProfileMetadataStore(paths.ProfilesMetadataFile));
+        service.EnsureMetadata();
+        var active = new ActiveProfileStore(paths.ActiveProfileFile);
+        active.Write("current");
+        object controller = Activator.CreateInstance(assembly.GetType("CodexProfileOverlay.OverlayController")!, paths, service, active,
+            new SettingsService(paths.SettingsFile), null!, null!, null!, new SafeLogger(paths.LogDirectory), new BackupMaintenanceService(paths))!;
+        Window? manager = null;
+        Window? settingsWindow = null;
+        try
+        {
+            var localizerType = assembly.GetType("CodexProfileOverlay.Localizer")!;
+            object localizer = Activator.CreateInstance(localizerType, LanguagePreference.English)!;
+            var ctor = assembly.GetType("CodexProfileOverlay.ProfileManagerWindow")!.GetConstructors().Single();
+            object?[] args = ctor.GetParameters().Select(p =>
+                p.ParameterType == typeof(IReadOnlyList<ProfileInfo>) ? (object)service.ListProfiles() :
+                p.ParameterType == typeof(string) ? "current" :
+                p.ParameterType == localizerType ? localizer :
+                p.Name == "removeProfile" ? (Action<ProfileInfo>)(profile => Invoke(controller, "RemoveProfile", profile)) :
+                p.ParameterType == typeof(Action<ProfileInfo>) ? (Action<ProfileInfo>)(_ => { }) :
+                p.ParameterType == typeof(Action<IReadOnlyList<string>>) ? (Action<IReadOnlyList<string>>)(_ => { }) :
+                p.ParameterType == typeof(Func<ProfileInfo, AccountAvailability>) ? (Func<ProfileInfo, AccountAvailability>)(_ => default) :
+                (object)(Action)(() => { })).ToArray();
+            manager = (Window)ctor.Invoke(args);
+            controller.GetType().GetField("profileManagerWindow", Private)!.SetValue(controller, manager);
+            var settingsCtor = assembly.GetType("CodexProfileOverlay.SettingsWindow")!.GetConstructors().Single();
+            object[] settingsArgs = settingsCtor.GetParameters().Select(p =>
+                p.ParameterType == typeof(OverlaySettings) ? (object)new OverlaySettings() :
+                p.ParameterType == typeof(IReadOnlyList<ProfileInfo>) ? service.ListProfiles() :
+                p.ParameterType == localizerType ? localizer :
+                p.ParameterType == typeof(ProfileStatusService) ? Field(controller, "statusService") :
+                p.ParameterType == typeof(BackupMaintenanceService) ? new BackupMaintenanceService(paths) :
+                p.ParameterType == typeof(UpdateService) ? Field(controller, "updates") :
+                p.ParameterType == typeof(Action<OverlaySettings>) ? (Action<OverlaySettings>)(_ => { }) :
+                p.ParameterType == typeof(Func<string, Task>) ? (Func<string, Task>)(_ => Task.CompletedTask) :
+                p.ParameterType == typeof(Func<bool>) ? (Func<bool>)(() => true) :
+                p.ParameterType == typeof(Action<bool>) ? (Action<bool>)(_ => { }) : (Action)(() => { })).ToArray();
+            settingsWindow = (Window)settingsCtor.Invoke(settingsArgs);
+            controller.GetType().GetField("settingsWindow", Private)!.SetValue(controller, settingsWindow);
+            settingsWindow.Show();
+            manager.Show();
+            var activeRow = ((ListBox)Field(manager, "listBox")).Items.OfType<ListBoxItem>().Single(i => ((ProfileInfo)i.Tag).Name == "current");
+            Check(!Descendants(activeRow).OfType<Button>().Single().ContextMenu!.Items.OfType<MenuItem>().Last().IsEnabled, "Active profile removal must be disabled");
+            int dialogs = 0, errors = 0;
+            bool confirm = false;
+            bool changeActive = false;
+            bool escapeCancel = false;
+            var watchdog = System.Diagnostics.Stopwatch.StartNew();
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+            timer.Tick += (_, _) =>
+            {
+                Check(watchdog.Elapsed < TimeSpan.FromSeconds(15), "Removal UI scenario timed out");
+                var dialog = Application.Current.Windows.Cast<Window>().FirstOrDefault(w => w.GetType().Name == "ConfirmDialog" && w.IsVisible);
+                if (dialog is not null)
+                {
+                    dialogs++;
+                    Check(ReferenceEquals(dialog.Owner, manager), "Removal confirmation must belong to profile manager");
+                    // A nested UI action must not enter a second removal during confirmation.
+                    Invoke(controller, "RemoveProfile", service.ListProfiles().Single(p => p.Name == "current"));
+                    if (escapeCancel)
+                    {
+                        dialog.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
+                            PresentationSource.FromVisual(dialog)!, 0, System.Windows.Input.Key.Escape) { RoutedEvent = System.Windows.Input.Keyboard.KeyDownEvent });
+                        return;
+                    }
+                    if (changeActive) active.Write("old");
+                    Invoke(Descendants(dialog).OfType<Button>().Single(b => confirm ? b.IsDefault : Equals(b.Content, "Cancel")), "OnClick");
+                    return;
+                }
+                var hwnd = GetActiveWindow();
+                if (hwnd != IntPtr.Zero && GetWindow(hwnd, 4) == new System.Windows.Interop.WindowInteropHelper(manager).Handle)
+                {
+                    errors++;
+                    SendMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero);
+                }
+            };
+            timer.Start();
+            try
+            {
+                var old = service.ListProfiles().Single(p => p.Name == "old");
+                string metadata = File.ReadAllText(paths.ProfilesMetadataFile);
+                Invoke(controller, "RemoveProfile", old);
+                Check(dialogs == 1 && errors == 0 && service.ListProfiles().Count == 2, "Cancel must preserve profiles");
+                Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Cancel must perform no writes");
+                // Closing the confirmation with X/Close is also cancellation.
+                Application.Current.Dispatcher.BeginInvoke(new Action(() => Application.Current.Windows.Cast<Window>().Single(w => w.GetType().Name == "ConfirmDialog").Close()));
+                Invoke(controller, "RemoveProfile", old);
+                Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Closing confirmation must preserve data");
+                escapeCancel = true;
+                Invoke(controller, "RemoveProfile", old);
+                escapeCancel = false;
+                Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Escape must preserve data");
+                confirm = true;
+                File.WriteAllText(paths.RemovedProfilesDirectory, "blocked");
+                Invoke(controller, "RemoveProfile", old);
+                Check(errors == 1 && service.ListProfiles().Count == 2 && manager.IsVisible, "File failure must show an owned error and keep app/profile alive");
+                File.Delete(paths.RemovedProfilesDirectory);
+                changeActive = true;
+                Invoke(controller, "RemoveProfile", old);
+                Check(errors == 2 && service.ListProfiles().Count == 2, "Active profile must be rechecked after confirmation");
+                changeActive = false;
+                active.Write("current");
+                Invoke(controller, "RemoveProfile", old);
+                Check(service.ListProfiles().Count == 1 && ((ListBox)Field(manager, "listBox")).Items.Count == 1, "Successful removal must rebuild the open profile manager");
+                Check(((IReadOnlyList<ProfileInfo>)Field(settingsWindow, "profiles")).Count == 1, "Open Settings must receive the updated list");
+                Check(!(bool)Field(controller, "accountOperation"), "Removal guard must reset after every outcome");
+                Check(Directory.GetFiles(paths.RemovedProfilesDirectory, "auth.json", SearchOption.AllDirectories).Length == 1, "Recovery must preserve saved login");
+            }
+            finally { timer.Stop(); }
+        }
+        finally { manager?.Close(); settingsWindow?.GetType().GetMethod("CloseForShutdown")!.Invoke(settingsWindow, null); ((IDisposable)controller).Dispose(); }
+        Console.WriteLine("PASS: removal confirmation/cancel, filesystem error, active-marker change, recovery, open Settings/manager refresh and operation guard.");
     }
 
     private static void CheckLoginRuntime(string temp)

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Fix profile removal crashing when a profiles junction and recovery folder are on different volumes. Preserve recovery data, roll back metadata failures, protect the active profile, and report removal errors without closing the app.
 - Keep login dialogs on a monitor work area in physical pixels, recover after display/DPI changes, prefer the active auxiliary owner, and make browser sign-in reachable from the taskbar. The exact two-monitor freeze in Issue #2 still requires reproduction on the reported setup.
 - Prevent nested Add profile prompts; check CLI availability before opening browser sign-in and report known CLI, missing-auth, permission and timeout failures without recording credentials or CLI output.
 - Bound login cleanup and cancel pipe reads when the CLI exits, including when a child retains stdout/stderr. Preserve the login window when active-account reauthorization closes Codex.
