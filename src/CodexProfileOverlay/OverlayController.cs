@@ -364,6 +364,7 @@ internal sealed class OverlayController : IDisposable
         EnsureOverlay();
         switching = true;
         AuthSwitchResult? switchResult = null;
+        bool relaunchAttempted = false;
         overlayWindow!.SetSwitching(true);
         try
         {
@@ -396,6 +397,7 @@ internal sealed class OverlayController : IDisposable
             RefreshProfiles();
             if (settings.LaunchCodexAfterSwitching)
             {
+                relaunchAttempted = true;
                 await LaunchCodexAndWaitAsync(disposalTokenSource.Token, throwOnFailure: true, launchTarget).ConfigureAwait(true);
             }
 
@@ -404,11 +406,20 @@ internal sealed class OverlayController : IDisposable
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            bool restored = false;
             if (switchResult is not null)
             {
                 try
                 {
+                    // Activation can start writers even if no window ever appears.
+                    using var rollbackShutdown = relaunchAttempted
+                        ? await processService.CloseCodexAsync(settings.GracefulCloseTimeoutSeconds,
+                            settings.ForceCloseFallback, CancellationToken.None)
+                        : null;
+                    if (rollbackShutdown is not null)
+                        CodexShutdownCoordinator.VerifyStopped(rollbackShutdown, CancellationToken.None);
                     switchService.Rollback(switchResult);
+                    restored = true;
                     RefreshProfiles();
                 }
                 catch (Exception rollbackException)
@@ -417,8 +428,10 @@ internal sealed class OverlayController : IDisposable
                 }
             }
             logger.Error("Auth-only profile switch failed.", exception);
-            overlayWindow?.ShowError(localizer["CouldNotSwitch"] + " " + localizer["PreviousAuthorizationRestored"] + ".");
-            trayIcon?.ShowBalloon("Codex Profile Overlay", localizer["CouldNotSwitch"] + " " + localizer["PreviousAuthorizationRestored"] + ".");
+            string message = localizer["CouldNotSwitch"];
+            if (restored) message += " " + localizer["PreviousAuthorizationRestored"] + ".";
+            overlayWindow?.ShowError(message);
+            trayIcon?.ShowBalloon("Codex Profile Overlay", message);
         }
         finally
         {

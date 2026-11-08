@@ -66,17 +66,22 @@ public sealed class AuthSwitchService
                 }
                 replacer.ReplaceFromSource(targetProfile.AuthFilePath, paths.SharedAuthFile);
                 activeProfileStore.Write(targetProfile.Name);
+                string completedBackup = backups.CompleteSwitchBackup(backup);
+                return new AuthSwitchResult(targetProfile.Name, previousProfile, completedBackup);
             }
-            catch
+            catch (Exception switchError)
             {
-                RestoreBackupIfPossible(backup, previousProfile);
-                RestoreActiveProfile(previousProfile);
-                backups.MarkRolledBack(backup);
+                try
+                {
+                    RestoreBackup(backup, previousProfile);
+                    backups.MarkRolledBack(backup);
+                }
+                catch (Exception rollbackError)
+                {
+                    throw new AggregateException("The authorization switch and its rollback failed.", switchError, rollbackError);
+                }
                 throw;
             }
-
-            string completedBackup = backups.CompleteSwitchBackup(backup);
-            return new AuthSwitchResult(targetProfile.Name, previousProfile, completedBackup);
         }
         finally
         {
@@ -95,14 +100,11 @@ public sealed class AuthSwitchService
         backups.RestoreCompletedSwitchBackup(result.BackupPath, paths.SharedAuthFile, paths.ActiveProfileFile);
     }
 
-    private void RestoreBackupIfPossible(SwitchBackup backup, string? previousProfile)
+    private void RestoreBackup(SwitchBackup backup, string? previousProfile)
     {
-        if (!File.Exists(backup.PreviousAuthFile))
-        {
-            return;
-        }
-
+        DesktopSnapshot.RejectLinks(backup.PreviousAuthFile);
         new AtomicFileReplacer().ReplaceFromSource(backup.PreviousAuthFile, paths.SharedAuthFile);
+        RestoreActiveProfile(previousProfile);
         if (previousProfile is not null)
         {
             string profileAuth = profileDiscovery.GetRequiredProfile(previousProfile).AuthFilePath;

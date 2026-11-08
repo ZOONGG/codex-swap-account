@@ -316,7 +316,8 @@ internal static class Program
             for (int i = 0; i < 2; i++)
             {
                 using var token = new CancellationTokenSource();
-                var progress = (Window)Activator.CreateInstance(assembly.GetType("CodexProfileOverlay.LoginProgressWindow")!, localizer, token)!;
+                var progress = (Window)Activator.CreateInstance(assembly.GetType("CodexProfileOverlay.LoginProgressWindow")!,
+                    localizer, token, "BrowserLogin", "LoginWaiting")!;
                 progress.Owner = owner;
                 placement.Invoke(null, new object?[] { progress, owner, IntPtr.Zero });
                 progress.Show(); progress.UpdateLayout();

@@ -46,6 +46,7 @@ public sealed class BackupMaintenanceService
             throw new InvalidDataException($"Switch backup would exceed {policy.MaximumSwitchBackupBytes} bytes.");
         }
 
+        DesktopSnapshot.RejectLinks(paths.BackupDirectory);
         Directory.CreateDirectory(paths.BackupDirectory);
         string id = $"{utcNow():yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}";
         string directory = Path.Combine(paths.BackupDirectory, $"txn-{id}");
@@ -87,7 +88,7 @@ public sealed class BackupMaintenanceService
             paths.BackupDirectory,
             "completed-" + Path.GetFileName(backup.DirectoryPath)["txn-".Length..]);
         Directory.Move(backup.DirectoryPath, completedPath);
-        CleanupRetention();
+        TryCleanupRetention();
         return completedPath;
     }
 
@@ -103,11 +104,21 @@ public sealed class BackupMaintenanceService
             paths.BackupDirectory,
             "completed-" + Path.GetFileName(backup.DirectoryPath)["txn-".Length..]);
         Directory.Move(backup.DirectoryPath, destination);
-        CleanupRetention();
+        TryCleanupRetention();
+    }
+
+    public void TryCleanupRetention()
+    {
+        try { CleanupRetention(); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger?.Error("Backup retention could not be completed.", exception);
+        }
     }
 
     public void CleanupRetention()
     {
+        DesktopSnapshot.RejectLinks(paths.BackupDirectory);
         if (!Directory.Exists(paths.BackupDirectory))
         {
             return;
@@ -116,6 +127,7 @@ public sealed class BackupMaintenanceService
         DateTimeOffset now = utcNow();
         foreach (string temporary in Directory.EnumerateDirectories(paths.BackupDirectory, "txn-*", SearchOption.TopDirectoryOnly))
         {
+            if (IsReparsePoint(temporary)) continue;
             SwitchBackupManifest? manifest = ReadManifest(temporary);
             if (manifest is not null
                 && !string.Equals(manifest.State, "active", StringComparison.OrdinalIgnoreCase)
@@ -153,6 +165,7 @@ public sealed class BackupMaintenanceService
 
     public BackupStorageSummary GetStorageSummary()
     {
+        DesktopSnapshot.RejectLinks(paths.BackupDirectory);
         if (!Directory.Exists(paths.BackupDirectory))
         {
             return new BackupStorageSummary(0, 0, policy.MaximumCompletedBackups, policy.MaximumCompletedStorageBytes);
@@ -196,18 +209,19 @@ public sealed class BackupMaintenanceService
     public SwitchBackupManifest RestoreCompletedSwitchBackup(string backupDirectory, string sharedAuthFile, string activeProfileFile)
     {
         string fullBackup = Path.GetFullPath(backupDirectory);
-        string backupRoot = Path.GetFullPath(paths.BackupDirectory) + Path.DirectorySeparatorChar;
-        if (!fullBackup.StartsWith(backupRoot, StringComparison.OrdinalIgnoreCase)
+        string backupRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(paths.BackupDirectory));
+        if (!string.Equals(Path.GetDirectoryName(fullBackup), backupRoot, StringComparison.OrdinalIgnoreCase)
             || !Path.GetFileName(fullBackup).StartsWith("completed-", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("Rollback backup path is outside the recognized backup directory.");
         }
 
+        DesktopSnapshot.RejectLinks(fullBackup);
+        EnsureAllowedSwitchBackup(fullBackup);
         SwitchBackupManifest manifest = ReadManifest(fullBackup)
             ?? throw new InvalidDataException("Rollback manifest is missing or invalid.");
         string previousAuth = Path.Combine(fullBackup, "previous-auth.json");
         ValidateAuthenticationFile(previousAuth, "previous-auth.json");
-        EnsureAllowedSwitchBackup(fullBackup);
         new AtomicFileReplacer().ReplaceFromSource(previousAuth, sharedAuthFile);
         RestoreActiveProfileMetadata(activeProfileFile, manifest.PreviousProfile);
         WriteManifest(fullBackup, manifest with { State = "rolled-back", CompletedUtc = utcNow() });
@@ -244,10 +258,12 @@ public sealed class BackupMaintenanceService
             "previous-active-profile.txt",
             "manifest.json",
         };
-        string[] files = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).ToArray();
-        if (files.Any(file => !allowed.Contains(Path.GetRelativePath(directory, file))))
+        string[] files = Directory.GetFileSystemEntries(directory);
+        foreach (string file in files)
         {
-            throw new InvalidDataException("Switch backup contains a forbidden file.");
+            if (!allowed.Contains(Path.GetFileName(file))
+                || (File.GetAttributes(file) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                throw new InvalidDataException("Switch backup contains a forbidden entry.");
         }
         if (files.Any(file => new FileInfo(file).Length > policy.MaximumFileBytes))
         {
@@ -261,6 +277,7 @@ public sealed class BackupMaintenanceService
 
     private IEnumerable<BackupEntry> EnumerateCompleted()
     {
+        DesktopSnapshot.RejectLinks(paths.BackupDirectory);
         if (!Directory.Exists(paths.BackupDirectory))
         {
             yield break;
@@ -288,6 +305,7 @@ public sealed class BackupMaintenanceService
 
     private IEnumerable<LegacyEntry> EnumerateLegacy()
     {
+        DesktopSnapshot.RejectLinks(paths.BackupDirectory);
         if (!Directory.Exists(paths.BackupDirectory))
         {
             yield break;
@@ -343,6 +361,7 @@ public sealed class BackupMaintenanceService
 
     private static void DeleteDirectoryWithoutFollowingReparsePoints(string directory)
     {
+        DesktopSnapshot.RejectLinks(directory);
         foreach (string child in Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly))
         {
             if (Directory.Exists(child) && !IsReparsePoint(child))
@@ -367,15 +386,19 @@ public sealed class BackupMaintenanceService
     private static void WriteManifest(string directory, SwitchBackupManifest manifest)
     {
         string target = Path.Combine(directory, "manifest.json");
+        DesktopSnapshot.RejectLinks(target);
         string temporary = Path.Combine(directory, $".manifest-{Guid.NewGuid():N}.tmp");
-        File.WriteAllText(temporary, JsonSerializer.Serialize(manifest, JsonOptions), new UTF8Encoding(false));
-        if (File.Exists(target))
+        try
         {
-            File.Replace(temporary, target, null);
+            File.WriteAllText(temporary, JsonSerializer.Serialize(manifest, JsonOptions), new UTF8Encoding(false));
+            if (File.Exists(target)) File.Replace(temporary, target, null);
+            else File.Move(temporary, target);
         }
-        else
+        finally
         {
-            File.Move(temporary, target);
+            try { File.Delete(temporary); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 
@@ -397,8 +420,10 @@ public sealed class BackupMaintenanceService
     {
         try
         {
+            string manifest = Path.Combine(directory, "manifest.json");
+            if (IsReparsePoint(manifest)) return null;
             return JsonSerializer.Deserialize<SwitchBackupManifest>(
-                File.ReadAllText(Path.Combine(directory, "manifest.json"), Encoding.UTF8));
+                File.ReadAllText(manifest, Encoding.UTF8));
         }
         catch (IOException)
         {

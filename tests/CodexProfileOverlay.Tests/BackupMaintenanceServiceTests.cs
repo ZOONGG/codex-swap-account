@@ -130,6 +130,68 @@ public sealed class BackupMaintenanceServiceTests
     }
 
     [Fact]
+    public void CleanupRetention_DoesNotTraverseTransactionJunction()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var temp = new TestLayout();
+        temp.AddProfile("target", "target-auth");
+        temp.WriteSharedAuth("previous-auth");
+        DateTimeOffset now = new(2026, 7, 20, 12, 0, 0, TimeSpan.Zero);
+        var service = new BackupMaintenanceService(temp.Paths, utcNow: () => now);
+        string completed = service.CompleteSwitchBackup(service.CreateSwitchBackup(
+            temp.Paths.SharedAuthFile, Path.Combine(temp.Paths.ProfilesDirectory, "target", "auth.json"), "current"));
+        string external = Path.Combine(temp.Paths.SharedCodexDirectory, "unrelated");
+        Directory.Move(completed, external);
+        string sentinel = Path.Combine(external, "keep.txt");
+        File.WriteAllText(sentinel, "keep");
+        string link = Path.Combine(temp.Paths.BackupDirectory, "txn-junction");
+        using var command = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c mklink /J \"{link}\" \"{external}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+        command.WaitForExit();
+        Assert.Equal(0, command.ExitCode);
+        now = now.AddDays(2);
+
+        try
+        {
+            service.CleanupRetention();
+
+            Assert.True(File.Exists(sentinel));
+            Assert.True(File.Exists(Path.Combine(external, "manifest.json")));
+        }
+        finally
+        {
+            if (Directory.Exists(link)) Directory.Delete(link);
+        }
+    }
+
+    [Fact]
+    public async Task SwitchAsync_WhenRetentionCannotDeleteExpiredBackup_KeepsCompletedSwitch()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var temp = new TestLayout();
+        temp.AddProfile("target", "target-auth");
+        temp.WriteSharedAuth("previous-auth");
+        Directory.CreateDirectory(temp.Paths.BackupDirectory);
+        string expired = Path.Combine(temp.Paths.BackupDirectory, "auth-expired.json");
+        File.WriteAllText(expired, "expired");
+        File.SetLastWriteTimeUtc(expired, DateTime.UtcNow.AddDays(-10));
+        using var locked = File.Open(expired, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var service = temp.CreateSwitchService();
+
+        AuthSwitchResult result = await service.SwitchAsync("target");
+
+        Assert.True(Directory.Exists(result.BackupPath));
+        Assert.Equal("target-auth", temp.ReadSharedAuth());
+        service.Rollback(result);
+        Assert.Equal("previous-auth", temp.ReadSharedAuth());
+    }
+
+    [Fact]
     public void Cleanup_NeverDeletesActiveTransaction()
     {
         using var temp = new TestLayout();
