@@ -29,6 +29,28 @@ public sealed class SafeLogger
         if (exception is not null)
         {
             line += $" | {exception.GetType().Name}: {Sanitize(exception.Message)}";
+            if (exception is System.ComponentModel.Win32Exception w32)
+            {
+                line += $" [NativeErrorCode={w32.NativeErrorCode}]";
+            }
+            Exception? inner = exception.InnerException;
+            int depth = 0;
+            while (inner is not null && depth < 4)
+            {
+                line += $" <- {inner.GetType().Name}: {Sanitize(inner.Message)}";
+                if (inner is System.ComponentModel.Win32Exception iw32)
+                {
+                    line += $" [NativeErrorCode={iw32.NativeErrorCode}]";
+                }
+                inner = inner.InnerException;
+                depth++;
+            }
+            string? stack = exception.StackTrace;
+            if (!string.IsNullOrEmpty(stack))
+            {
+                string firstFrames = string.Join(" | ", stack.Split('\n').Take(4).Select(s => Sanitize(s.Trim())));
+                line += $" || {firstFrames}";
+            }
         }
 
         lock (gate)

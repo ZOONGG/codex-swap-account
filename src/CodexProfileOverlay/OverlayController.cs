@@ -437,7 +437,7 @@ internal sealed class OverlayController : IDisposable
         if (installingUpdate || switching || accountOperation) return;
         EnsureOverlay();
         string? name = ShowPrompt(PromptOwner(), localizer["AddProfileTitle"], localizer["ProfileDirectoryName"],
-            primaryText: localizer["BrowserLogin"]);
+            primaryText: "Capture");
         if (name is null) return;
         string? error = !ProfileName.IsValid(name) ? "InvalidProfileName"
             : Directory.Exists(Path.Combine(paths.ProfilesDirectory, name)) || File.Exists(Path.Combine(paths.ProfilesDirectory, name)) ? "DuplicateProfileName" : null;
@@ -446,7 +446,93 @@ internal sealed class OverlayController : IDisposable
             System.Windows.MessageBox.Show(PromptOwner(), localizer[error], localizer["AddProfileTitle"], MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        await LoginAccountAsync(name, false);
+        await CaptureProfileAsync(name);
+    }
+
+    private async Task CaptureProfileAsync(string name)
+    {
+        if (installingUpdate || switching || accountOperation) return;
+
+        string liveDefault = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Packages", "OpenAI.Codex_2p2nqsd0c76g0", "LocalCache", "Roaming", "Codex", "web", "Codex", "Default");
+
+        if (!File.Exists(paths.SharedAuthFile) || !Directory.Exists(liveDefault))
+        {
+            System.Windows.MessageBox.Show(PromptOwner(),
+                "Launch Codex Desktop and sign in to the target account first, then try again.",
+                "Capture profile", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        bool proceed = ConfirmDialog.Show(PromptOwner(), CurrentCodexWindowHandle(),
+            "Capture profile",
+            $"Make sure you are signed in to Codex Desktop under the account you want to save as '{name}'. The app will close briefly while the snapshot is taken, then relaunch.",
+            "Capture", localizer["Cancel"]);
+        if (!proceed) return;
+
+        accountOperation = true;
+        PreparedCodexLaunch? launch = null;
+        CodexDesktopProcessSession? shutdown = null;
+        try
+        {
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(disposalTokenSource.Token);
+            cancellation.CancelAfter(TimeSpan.FromMinutes(2));
+
+            launch = await processService.PrepareLaunchAsync(cancellation.Token);
+            shutdown = await processService.CloseCodexAsync(settings.GracefulCloseTimeoutSeconds,
+                settings.ForceCloseFallback, cancellation.Token);
+            CodexShutdownCoordinator.VerifyStopped(shutdown, cancellation.Token);
+
+            string slotDir = Path.Combine(paths.ProfilesDirectory, name);
+            Directory.CreateDirectory(slotDir);
+            File.Copy(paths.SharedAuthFile, Path.Combine(slotDir, "auth.json"), overwrite: true);
+
+            string slotChromium = Path.Combine(slotDir, "web-default");
+            if (Directory.Exists(slotChromium))
+            {
+                Directory.Move(slotChromium, slotChromium + ".old-" + DateTime.Now.ToString("yyyyMMddHHmmss"));
+            }
+
+            var robocopy = new ProcessStartInfo("robocopy",
+                $"\"{liveDefault}\" \"{slotChromium}\" /E /NFL /NDL /NJH /NJS /NC /NS /NP")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using (var p = Process.Start(robocopy))
+            {
+                p?.WaitForExit(60000);
+            }
+
+            if (!File.Exists(Path.Combine(slotChromium, "Preferences")))
+            {
+                throw new InvalidOperationException("Chromium snapshot did not materialize (Preferences missing).");
+            }
+
+            activeProfileStore.Write(name);
+            RefreshProfiles();
+            overlayWindow?.ShowNotification($"Profile '{name}' captured.");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            logger.Error("Profile capture failed.", exception);
+            overlayWindow?.ShowError("Profile capture failed.");
+        }
+        finally
+        {
+            if (launch is not null && !disposalTokenSource.IsCancellationRequested)
+            {
+                try { await LaunchCodexAndWaitAsync(disposalTokenSource.Token, throwOnFailure: false, launch); }
+                catch (Exception) { overlayWindow?.ShowError(localizer["LoginRelaunchFailed"]); }
+            }
+            shutdown?.Dispose();
+            accountOperation = false;
+            RefreshProfiles();
+        }
     }
 
     private async Task LoginAccountAsync(string name, bool reauthorize)

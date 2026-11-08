@@ -76,7 +76,9 @@ internal sealed class HotkeyManager : IDisposable
             return true;
         }
 
-        conflict = $"{gesture} could not be registered ({new Win32Exception().Message}).";
+        int errorCode = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+        string message = new Win32Exception(errorCode).Message;
+        conflict = $"{gesture} could not be registered (Win32 error {errorCode}: {message}).";
         return false;
     }
 
