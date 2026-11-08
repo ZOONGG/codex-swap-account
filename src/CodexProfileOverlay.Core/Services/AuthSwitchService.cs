@@ -1,13 +1,25 @@
+using CodexProfileOverlay.Core.Models;
+
 namespace CodexProfileOverlay.Core.Services;
 
 public sealed class AuthSwitchService
 {
+    private static readonly string CodexDesktopDefaultDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Packages", "OpenAI.Codex_2p2nqsd0c76g0", "LocalCache", "Roaming", "Codex", "web", "Codex", "Default");
+
     private readonly AppPaths paths;
     private readonly ProfileDiscoveryService profileDiscovery;
     private readonly ActiveProfileStore activeProfileStore;
     private readonly IAtomicFileReplacer replacer;
     private readonly BackupMaintenanceService backups;
     private readonly SemaphoreSlim switchGate = new(1, 1);
+
+    private sealed record ChromiumSwapRecord(
+        string? PreviousSlot,
+        string? ArchivedLiveAt,
+        string TargetSlot,
+        string? RenamedExistingPreviousTo);
 
     public AuthSwitchService(
         AppPaths paths,
@@ -53,8 +65,10 @@ public sealed class AuthSwitchService
             }
 
             backup = backups.CreateSwitchBackup(paths.SharedAuthFile, targetProfile.AuthFilePath, previousProfile);
+            ChromiumSwapRecord? chromiumSwap = null;
             try
             {
+                chromiumSwap = SwapChromiumIfConfigured(previousProfile, targetProfile);
                 if (previousProfile is not null)
                 {
                     var currentProfile = profileDiscovery.GetRequiredProfile(previousProfile);
@@ -65,6 +79,7 @@ public sealed class AuthSwitchService
             }
             catch
             {
+                if (chromiumSwap is not null) RollbackChromiumSwap(chromiumSwap);
                 RestoreBackupIfPossible(backup, previousProfile);
                 RestoreActiveProfile(previousProfile);
                 backups.MarkRolledBack(backup);
@@ -114,6 +129,81 @@ public sealed class AuthSwitchService
         else if (File.Exists(paths.ActiveProfileFile))
         {
             File.Delete(paths.ActiveProfileFile);
+        }
+    }
+
+    private ChromiumSwapRecord? SwapChromiumIfConfigured(string? previousProfile, ProfileInfo targetProfile)
+    {
+        string targetSlot = Path.Combine(targetProfile.DirectoryPath, "web-default");
+        if (!Directory.Exists(targetSlot))
+        {
+            return null;
+        }
+
+        string? previousSlot = null;
+        if (previousProfile is not null)
+        {
+            ProfileInfo p = profileDiscovery.GetRequiredProfile(previousProfile);
+            previousSlot = Path.Combine(p.DirectoryPath, "web-default");
+        }
+
+        string? archivedLiveAt = null;
+        string? renamedExistingPreviousTo = null;
+
+        if (Directory.Exists(CodexDesktopDefaultDir))
+        {
+            if (previousSlot is null)
+            {
+                throw new InvalidOperationException(
+                    "Live Codex Desktop Chromium profile is present but no previous profile is recorded for archival.");
+            }
+
+            if (Directory.Exists(previousSlot))
+            {
+                string bak = previousSlot + ".old-" + DateTime.Now.ToString("yyyyMMddHHmmss");
+                Directory.Move(previousSlot, bak);
+                renamedExistingPreviousTo = bak;
+            }
+
+            Directory.Move(CodexDesktopDefaultDir, previousSlot);
+            archivedLiveAt = previousSlot;
+        }
+
+        Directory.Move(targetSlot, CodexDesktopDefaultDir);
+
+        return new ChromiumSwapRecord(previousSlot, archivedLiveAt, targetSlot, renamedExistingPreviousTo);
+    }
+
+    private static void RollbackChromiumSwap(ChromiumSwapRecord record)
+    {
+        try
+        {
+            if (Directory.Exists(CodexDesktopDefaultDir))
+            {
+                if (Directory.Exists(record.TargetSlot))
+                {
+                    string bak = record.TargetSlot + ".rollback-" + DateTime.Now.ToString("yyyyMMddHHmmss");
+                    Directory.Move(record.TargetSlot, bak);
+                }
+                Directory.Move(CodexDesktopDefaultDir, record.TargetSlot);
+            }
+
+            if (record.ArchivedLiveAt is not null && Directory.Exists(record.ArchivedLiveAt))
+            {
+                Directory.Move(record.ArchivedLiveAt, CodexDesktopDefaultDir);
+            }
+
+            if (record.RenamedExistingPreviousTo is not null
+                && record.PreviousSlot is not null
+                && !Directory.Exists(record.PreviousSlot)
+                && Directory.Exists(record.RenamedExistingPreviousTo))
+            {
+                Directory.Move(record.RenamedExistingPreviousTo, record.PreviousSlot);
+            }
+        }
+        catch
+        {
+            // Best-effort rollback; outer catch still rethrows the original fault.
         }
     }
 }

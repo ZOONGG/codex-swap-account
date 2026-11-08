@@ -138,7 +138,27 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
             if (!GetProcessTimes(terminateHandle, out long created, out _, out _, out _)
                 || DateTimeOffset.FromFileTime(created) != StartedAt)
                 throw new InvalidOperationException("Process identity changed during shutdown.");
-            if (!TerminateProcess(terminateHandle, 1) && ExitedAt is null) throw new Win32Exception(Marshal.GetLastWin32Error());
+            bool ok = TerminateProcess(terminateHandle, 1);
+            int tpErr = ok ? 0 : Marshal.GetLastWin32Error();
+            if (!ok && ExitedAt is null)
+            {
+                try
+                {
+                    using var killer = Process.Start(new ProcessStartInfo("taskkill", $"/F /T /PID {Id}")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                    });
+                    killer?.WaitForExit(3000);
+                }
+                catch { /* fall through to final liveness check */ }
+                for (int i = 0; i < 25 && ExitedAt is null; i++) Thread.Sleep(100);
+                if (ExitedAt is null)
+                    throw new Win32Exception(tpErr == 0 ? 5 : tpErr,
+                        $"PID {Id} refused TerminateProcess (err {tpErr}) and taskkill /F fallback did not clear it.");
+            }
         }
 
         public void Dispose() => handle.Dispose();
