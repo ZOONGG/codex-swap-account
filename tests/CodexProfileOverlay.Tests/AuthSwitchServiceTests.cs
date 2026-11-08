@@ -165,7 +165,7 @@ public sealed class AuthSwitchServiceTests
     }
 
     [Fact]
-    public async Task SwitchAsync_WhenBackupCannotBeFinalized_RestoresPreviousAuthorization()
+    public async Task SwitchAsync_WhenBackupCannotBeFinalized_PreservesCommittedAuthorization()
     {
         if (!OperatingSystem.IsWindows()) return;
         using var temp = new TestLayout();
@@ -179,9 +179,12 @@ public sealed class AuthSwitchServiceTests
         Assert.Collection(error.InnerExceptions, item => Assert.IsAssignableFrom<IOException>(item),
             item => Assert.IsAssignableFrom<IOException>(item));
 
-        Assert.Equal("fresh-current-auth", temp.ReadSharedAuth());
-        Assert.Equal("current", temp.ActiveProfileStore.Read());
-        Assert.Equal("target-auth", temp.ReadProfileAuth("target"));
+        Assert.Equal("target-auth", temp.ReadSharedAuth());
+        Assert.Equal("target", temp.ActiveProfileStore.Read());
+        Assert.Single(Directory.GetDirectories(temp.Paths.BackupDirectory, "auth-pending-*"));
+        blocker.Dispose();
+        temp.CreateSwitchService().RecoverPendingSwitch();
+        Assert.Empty(Directory.GetDirectories(temp.Paths.BackupDirectory, "auth-pending-*"));
     }
 
     private sealed class BlockBackupFinalization(string root) : IAtomicFileReplacer, IDisposable
@@ -191,7 +194,7 @@ public sealed class AuthSwitchServiceTests
         public void ReplaceFromSource(string sourceFile, string destinationFile)
         {
             new AtomicFileReplacer().ReplaceFromSource(sourceFile, destinationFile);
-            string transaction = Directory.GetDirectories(root, "txn-*").Single();
+            string transaction = Directory.GetDirectories(root, "auth-pending-*").Single();
             manifest ??= File.Open(Path.Combine(transaction, "manifest.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
         }
 
@@ -208,7 +211,6 @@ public sealed class AuthSwitchServiceTests
             calls++;
             if (calls == 2)
             {
-                File.WriteAllText(destinationFile, "corrupted-before-failure");
                 throw new IOException("Simulated replacement failure.");
             }
             inner.ReplaceFromSource(sourceFile, destinationFile);

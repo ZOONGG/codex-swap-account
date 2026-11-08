@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace CodexProfileOverlay.Core.Services;
@@ -80,6 +81,149 @@ public sealed class BackupMaintenanceService
         }
     }
 
+    private const string PendingPrefix = "auth-pending-";
+
+    internal SwitchBackup PrepareAuthSwitch(string targetAuth, string? previousProfile, string? targetProfile,
+        string? savedProfileHash, string expectedSharedHash)
+    {
+        FileSafety previous = ValidateAuthenticationFile(paths.SharedAuthFile, "shared auth.json");
+        FileSafety target = ValidateAuthenticationFile(targetAuth, "target auth.json");
+        if (previous.Sha256 != expectedSharedHash)
+            throw new InvalidDataException("Shared authorization changed before the switch.");
+
+        DesktopSnapshot.RejectLinks(paths.BackupDirectory);
+        Directory.CreateDirectory(paths.BackupDirectory);
+        string id = $"{utcNow():yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}";
+        string staging = Path.Combine(paths.BackupDirectory, "auth-preparing-" + id);
+        string pending = Path.Combine(paths.BackupDirectory, PendingPrefix + id);
+        Directory.CreateDirectory(staging);
+        try
+        {
+            string copy = Path.Combine(staging, "previous-auth.json");
+            using (var source = OpenAuthForSwitch(paths.SharedAuthFile))
+            using (var destination = new FileStream(copy, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                source.CopyTo(destination);
+                destination.Flush(flushToDisk: true);
+            }
+            if (ValidateAuthenticationFile(copy, "previous-auth.json") != previous)
+                throw new InvalidDataException("Shared authorization changed while making the backup.");
+
+            DesktopSnapshot.WriteNew(Path.Combine(staging, "previous-active-profile.txt"),
+                Encoding.UTF8.GetBytes(previousProfile ?? string.Empty));
+            var manifest = new SwitchBackupManifest(2, "active", utcNow(), null, previousProfile,
+                target.Sha256, previous.Sha256, previous.Size, new(targetProfile, savedProfileHash));
+            DesktopSnapshot.WriteNew(Path.Combine(staging, "manifest.json"),
+                JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions));
+            EnsureAllowedSwitchBackup(staging);
+            AuthSwitchFiles.MoveDurably(staging, pending);
+            return new SwitchBackup(pending, Path.Combine(pending, "previous-auth.json"), manifest);
+        }
+        finally
+        {
+            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+        }
+    }
+
+    internal string? FindPendingAuthSwitch()
+    {
+        DesktopSnapshot.RejectLinks(paths.BackupDirectory);
+        string[] pending;
+        try
+        {
+            pending = Directory.GetFileSystemEntries(paths.BackupDirectory, PendingPrefix + "*");
+            foreach (string legacy in Directory.EnumerateFileSystemEntries(paths.BackupDirectory, "txn-*"))
+            {
+                DesktopSnapshot.RejectLinks(legacy);
+                // Old switch and login journals did not identify the intended target.
+                if (ReadManifest(legacy)?.State is not ("completed" or "rolled-back" or "preparing"))
+                    throw new InvalidDataException("An older authorization transaction requires manual recovery.");
+            }
+        }
+        catch (DirectoryNotFoundException) when (DesktopSnapshot.Attributes(paths.BackupDirectory) is null)
+        {
+            return null;
+        }
+
+        if (pending.Length > 1)
+            throw new InvalidDataException("Multiple authorization transactions require manual recovery.");
+        return pending.SingleOrDefault();
+    }
+
+    internal SwitchBackup ReadAuthSwitch(string directory)
+    {
+        DesktopSnapshot.RejectLinks(directory);
+        EnsureAllowedSwitchBackup(directory);
+        SwitchBackupManifest manifest = ReadManifest(directory)
+            ?? throw new InvalidDataException("Authorization recovery manifest is missing or invalid.");
+        if (manifest.Version != 2 || manifest.Recovery is not { } recovery
+            || manifest.State is not ("active" or "completed" or "rolled-back")
+            || (manifest.State == "active") != (manifest.CompletedUtc is null)
+            || !IsHash(manifest.PreviousAuthSha256) || !IsHash(manifest.TargetAuthSha256)
+            || (manifest.PreviousProfile is not null && !ProfileName.IsValid(manifest.PreviousProfile))
+            || (recovery.TargetProfile is not null && !ProfileName.IsValid(recovery.TargetProfile))
+            || string.Equals(manifest.PreviousProfile, recovery.TargetProfile, StringComparison.OrdinalIgnoreCase)
+            || (recovery.PreviousProfileAuthSha256 is not null
+                && (manifest.PreviousProfile is null || recovery.TargetProfile is null || !IsHash(recovery.PreviousProfileAuthSha256))))
+            throw new InvalidDataException("Authorization recovery manifest is invalid.");
+
+        string previousAuth = Path.Combine(directory, "previous-auth.json");
+        FileSafety previous = ValidateAuthenticationFile(previousAuth, "previous-auth.json");
+        if (previous.Sha256 != manifest.PreviousAuthSha256 || previous.Size != manifest.PreviousAuthBytes
+            || File.ReadAllText(Path.Combine(directory, "previous-active-profile.txt")) != (manifest.PreviousProfile ?? ""))
+            throw new InvalidDataException("Authorization recovery backup does not match its manifest.");
+        return new SwitchBackup(directory, previousAuth, manifest);
+
+        static bool IsHash(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
+    }
+
+    internal SwitchBackup ReadAuthRollbackSource(string directory)
+    {
+        string fullPath = Path.GetFullPath(directory);
+        if (!string.Equals(Path.GetDirectoryName(fullPath), Path.TrimEndingDirectorySeparator(paths.BackupDirectory),
+                StringComparison.OrdinalIgnoreCase)
+            || !Path.GetFileName(fullPath).StartsWith("completed-", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Rollback backup is outside the recognized backup directory.");
+        return ReadAuthSwitch(fullPath);
+    }
+
+    internal string FinishAuthSwitch(SwitchBackup backup, bool committed)
+    {
+        if (backup.Manifest.State == "active")
+        {
+            var manifest = backup.Manifest with { State = committed ? "completed" : "rolled-back", CompletedUtc = utcNow() };
+            // Keep interrupted manifest writes outside the pending directory.
+            string temporary = Path.Combine(paths.BackupDirectory, $".auth-manifest-{Guid.NewGuid():N}.tmp");
+            try
+            {
+                DesktopSnapshot.WriteNew(temporary, JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions));
+                AuthSwitchFiles.MoveDurably(temporary, Path.Combine(backup.DirectoryPath, "manifest.json"), overwrite: true);
+            }
+            finally { File.Delete(temporary); }
+        }
+
+        string completed = Path.Combine(paths.BackupDirectory,
+            "completed-" + Path.GetFileName(backup.DirectoryPath)[PendingPrefix.Length..]);
+        AuthSwitchFiles.MoveDurably(backup.DirectoryPath, completed);
+        TryCleanupRetention();
+        return completed;
+    }
+
+    internal FileStream OpenAuthForSwitch(string path)
+    {
+        DesktopSnapshot.RejectLinks(path);
+        var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length > 0 && stream.Length <= policy.MaximumFileBytes) return stream;
+        stream.Dispose();
+        throw new InvalidDataException("Authorization file size is outside the recovery limits.");
+    }
+
+    internal string AuthHash(string path)
+    {
+        using var stream = OpenAuthForSwitch(path);
+        return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
     public string CompleteSwitchBackup(SwitchBackup backup)
     {
         SwitchBackupManifest completed = backup.Manifest with { State = "completed", CompletedUtc = utcNow() };
@@ -90,21 +234,6 @@ public sealed class BackupMaintenanceService
         Directory.Move(backup.DirectoryPath, completedPath);
         TryCleanupRetention();
         return completedPath;
-    }
-
-    public void MarkRolledBack(SwitchBackup backup)
-    {
-        if (!Directory.Exists(backup.DirectoryPath))
-        {
-            return;
-        }
-
-        WriteManifest(backup.DirectoryPath, backup.Manifest with { State = "rolled-back", CompletedUtc = utcNow() });
-        string destination = Path.Combine(
-            paths.BackupDirectory,
-            "completed-" + Path.GetFileName(backup.DirectoryPath)["txn-".Length..]);
-        Directory.Move(backup.DirectoryPath, destination);
-        TryCleanupRetention();
     }
 
     public void TryCleanupRetention()
@@ -206,31 +335,9 @@ public sealed class BackupMaintenanceService
         }
     }
 
-    public SwitchBackupManifest RestoreCompletedSwitchBackup(string backupDirectory, string sharedAuthFile, string activeProfileFile)
-    {
-        string fullBackup = Path.GetFullPath(backupDirectory);
-        string backupRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(paths.BackupDirectory));
-        if (!string.Equals(Path.GetDirectoryName(fullBackup), backupRoot, StringComparison.OrdinalIgnoreCase)
-            || !Path.GetFileName(fullBackup).StartsWith("completed-", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException("Rollback backup path is outside the recognized backup directory.");
-        }
-
-        DesktopSnapshot.RejectLinks(fullBackup);
-        EnsureAllowedSwitchBackup(fullBackup);
-        SwitchBackupManifest manifest = ReadManifest(fullBackup)
-            ?? throw new InvalidDataException("Rollback manifest is missing or invalid.");
-        string previousAuth = Path.Combine(fullBackup, "previous-auth.json");
-        ValidateAuthenticationFile(previousAuth, "previous-auth.json");
-        new AtomicFileReplacer().ReplaceFromSource(previousAuth, sharedAuthFile);
-        RestoreActiveProfileMetadata(activeProfileFile, manifest.PreviousProfile);
-        WriteManifest(fullBackup, manifest with { State = "rolled-back", CompletedUtc = utcNow() });
-        logger?.Info($"Restored switch backup file previous-auth.json ({manifest.PreviousAuthBytes} bytes).");
-        return manifest;
-    }
-
     private FileSafety ValidateAuthenticationFile(string file, string sanitizedName)
     {
+        DesktopSnapshot.RejectLinks(file);
         if (!File.Exists(file))
         {
             throw new FileNotFoundException($"{sanitizedName} was not found.");
@@ -402,26 +509,12 @@ public sealed class BackupMaintenanceService
         }
     }
 
-    private static void RestoreActiveProfileMetadata(string activeProfileFile, string? previousProfile)
-    {
-        if (previousProfile is null)
-        {
-            if (File.Exists(activeProfileFile))
-            {
-                File.Delete(activeProfileFile);
-            }
-            return;
-        }
-
-        new ActiveProfileStore(activeProfileFile).Write(previousProfile);
-    }
-
     private static SwitchBackupManifest? ReadManifest(string directory)
     {
         try
         {
             string manifest = Path.Combine(directory, "manifest.json");
-            if (IsReparsePoint(manifest)) return null;
+            if (IsReparsePoint(manifest) || new FileInfo(manifest).Length > 16 * 1024) return null;
             return JsonSerializer.Deserialize<SwitchBackupManifest>(
                 File.ReadAllText(manifest, Encoding.UTF8));
         }
@@ -463,7 +556,12 @@ public sealed record SwitchBackupManifest(
     string? PreviousProfile,
     string TargetAuthSha256,
     string PreviousAuthSha256,
-    long PreviousAuthBytes);
+    long PreviousAuthBytes,
+    SwitchRecoveryDetails? Recovery = null);
+
+public sealed record SwitchRecoveryDetails(
+    [property: JsonRequired] string? TargetProfile,
+    [property: JsonRequired] string? PreviousProfileAuthSha256);
 
 public sealed record BackupStorageSummary(
     long TotalBytes,

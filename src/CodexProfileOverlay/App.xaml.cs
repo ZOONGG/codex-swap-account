@@ -158,8 +158,9 @@ public partial class App : Application
             var activeProfileStore = new ActiveProfileStore(paths.ActiveProfileFile);
             var settingsService = new SettingsService(paths.SettingsFile);
             var backupMaintenance = new BackupMaintenanceService(paths, logger);
-            backupMaintenance.TryCleanupRetention();
             var switchService = new AuthSwitchService(paths, profileDiscovery, activeProfileStore, backups: backupMaintenance);
+            switchService.RecoverPendingSwitch();
+            backupMaintenance.TryCleanupRetention();
             var processService = new CodexProcessService(logger);
             controller = new OverlayController(
                 paths,

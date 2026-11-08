@@ -29,6 +29,8 @@ public sealed class DesktopSessionService
     public void RequireNoPendingOperation()
     {
         if (HasPendingOperation) throw new InvalidOperationException("Recover the pending Desktop session operation first.");
+        if (new BackupMaintenanceService(paths).FindPendingAuthSwitch() is not null)
+            throw new InvalidOperationException("Recover the pending authorization switch first.");
     }
 
     public bool IsDesktopProfile(string name) => DesktopSnapshot.HasSnapshot(Profile(name))
