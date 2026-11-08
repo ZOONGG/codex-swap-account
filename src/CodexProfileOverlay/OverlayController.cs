@@ -875,7 +875,7 @@ internal sealed class OverlayController : IDisposable
         {
             if (desktopSessions.HasPendingOperation)
             {
-                ShowDesktopError("DesktopRecoveryRequired");
+                ShowRemovalError(localizer["DesktopRecoveryRequired"]);
                 return;
             }
             if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
@@ -888,6 +888,11 @@ internal sealed class OverlayController : IDisposable
                 localizer["Remove"], localizer["RemoveProfilePrompt"], localizer["Remove"], localizer["Cancel"], danger: true))
                 return;
             // Re-read after the modal dispatcher loop.
+            if (desktopSessions.HasPendingOperation)
+            {
+                ShowRemovalError(localizer["DesktopRecoveryRequired"]);
+                return;
+            }
             profileManager.RemoveProfile(profile.Name, activeProfileStore.Read());
             if (!TryRefreshProfiles())
             {

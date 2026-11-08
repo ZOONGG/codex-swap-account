@@ -179,7 +179,8 @@ public sealed class ProfileManagerService
     {
         new DesktopSessionService(paths).RequireNoPendingOperation();
         string validName = ProfileName.RequireValid(directoryName);
-        if (string.Equals(validName, activeProfile, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(validName, activeProfile, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(validName, new ActiveProfileStore(paths.ActiveProfileFile).Read(), StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("The active profile cannot be removed.");
         }
@@ -193,8 +194,6 @@ public sealed class ProfileManagerService
 
         if (new DesktopSessionService(paths).IsDesktopProfile(validName))
         {
-            if (string.Equals(validName, new ActiveProfileStore(paths.ActiveProfileFile).Read(), StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("The active Desktop profile cannot be removed.");
             DesktopSnapshot.RejectLinks(source);
             DesktopSnapshot.RejectLinks(paths.RemovedProfilesDirectory);
         }
@@ -210,10 +209,18 @@ public sealed class ProfileManagerService
         {
             // Directory.Move cannot cross volumes (including a profiles-root junction).
             // Copy completely before atomically detaching the source on its own volume.
-            CopyRecoveryDirectory(source, destination);
             // Leading space makes this private staging name invalid to ProfileName/discovery.
             movedSource = Path.Combine(paths.ProfilesDirectory, " .removed-" + Guid.NewGuid().ToString("N"));
-            Directory.Move(source, movedSource);
+            try
+            {
+                CopyRecoveryDirectory(source, destination);
+                Directory.Move(source, movedSource);
+            }
+            catch
+            {
+                TryCleanRemovalCopy(destination);
+                throw;
+            }
         }
 
         try
@@ -228,16 +235,22 @@ public sealed class ProfileManagerService
         catch
         {
             Directory.Move(movedSource, source);
+            if (movedSource != destination) TryCleanRemovalCopy(destination);
             throw;
         }
         if (movedSource != destination)
         {
             // Committed recovery is complete. Retain an extra staging copy if locked.
-            try { Directory.Delete(movedSource, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            TryCleanRemovalCopy(movedSource);
         }
         return destination;
+    }
+
+    private static void TryCleanRemovalCopy(string directory)
+    {
+        try { Directory.Delete(directory, recursive: true); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private static void CopyRecoveryDirectory(string source, string destination)

@@ -138,7 +138,10 @@ public sealed class ProfileManagerServiceTests
     {
         using var temp = new TestLayout();
         temp.AddProfile("current", "fake-auth");
-        Assert.Throws<InvalidOperationException>(() => CreateService(temp).RemoveProfile("current", "CURRENT"));
+        var service = CreateService(temp);
+        Assert.Throws<InvalidOperationException>(() => service.RemoveProfile("current", "CURRENT"));
+        temp.ActiveProfileStore.Write("current");
+        Assert.Throws<InvalidOperationException>(() => service.RemoveProfile("CURRENT", null));
         Assert.Equal("fake-auth", temp.ReadProfileAuth("current"));
         Assert.False(Directory.Exists(temp.Paths.RemovedProfilesDirectory));
     }
@@ -178,6 +181,7 @@ public sealed class ProfileManagerServiceTests
                 Assert.ThrowsAny<IOException>(() => service.RemoveProfile("old", "current"));
                 Assert.Equal(metadata, File.ReadAllText(temp.Paths.ProfilesMetadataFile));
                 Assert.Equal(2, service.ListProfiles().Count);
+                Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Paths.RemovedProfilesDirectory));
                 return;
             }
             if (failMetadata) Directory.CreateDirectory(temp.Paths.ProfilesMetadataFile + ".tmp");
@@ -187,6 +191,7 @@ public sealed class ProfileManagerServiceTests
                 Assert.Equal("fake-old-auth", temp.ReadProfileAuth("old"));
                 Assert.Equal(metadata, File.ReadAllText(temp.Paths.ProfilesMetadataFile));
                 Assert.Equal(2, service.ListProfiles().Count);
+                Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Paths.RemovedProfilesDirectory));
             }
             else
             {

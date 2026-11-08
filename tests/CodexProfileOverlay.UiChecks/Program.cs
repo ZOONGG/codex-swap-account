@@ -148,12 +148,21 @@ internal static class Program
             controller.GetType().GetField("settingsWindow", Private)!.SetValue(controller, settingsWindow);
             settingsWindow.Show();
             manager.Show();
-            var activeRow = ((ListBox)Field(manager, "listBox")).Items.OfType<ListBoxItem>().Single(i => ((ProfileInfo)i.Tag).Name == "current");
-            Check(!Descendants(activeRow).OfType<Button>().Single().ContextMenu!.Items.OfType<MenuItem>().Last().IsEnabled, "Active profile removal must be disabled");
+            var rows = (ListBox)Field(manager, "listBox");
+            MenuItem RemoveItem(string name)
+            {
+                var row = rows.Items.OfType<ListBoxItem>().Single(i => ((ProfileInfo)i.Tag).Name == name);
+                return Descendants(row).OfType<Button>().Single().ContextMenu!.Items.OfType<MenuItem>().Last();
+            }
+            void ClickRemove() => RemoveItem("old").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Check(!RemoveItem("current").IsEnabled, "Active profile removal must be disabled");
             int dialogs = 0, errors = 0;
             bool confirm = false;
             bool changeActive = false;
+            bool startRecovery = false;
             bool escapeCancel = false;
+            string pending = Path.Combine(paths.ApplicationDataDirectory, "desktop-recovery", "pending.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(pending)!);
             var watchdog = System.Diagnostics.Stopwatch.StartNew();
             var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
             timer.Tick += (_, _) =>
@@ -173,6 +182,7 @@ internal static class Program
                         return;
                     }
                     if (changeActive) active.Write("old");
+                    if (startRecovery) File.WriteAllText(pending, "fixture pending journal");
                     Invoke(Descendants(dialog).OfType<Button>().Single(b => confirm ? b.IsDefault : Equals(b.Content, "Cancel")), "OnClick");
                     return;
                 }
@@ -186,30 +196,39 @@ internal static class Program
             timer.Start();
             try
             {
-                var old = service.ListProfiles().Single(p => p.Name == "old");
                 string metadata = File.ReadAllText(paths.ProfilesMetadataFile);
-                Invoke(controller, "RemoveProfile", old);
+                ClickRemove();
                 Check(dialogs == 1 && errors == 0 && service.ListProfiles().Count == 2, "Cancel must preserve profiles");
                 Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Cancel must perform no writes");
                 // Closing the confirmation with X/Close is also cancellation.
                 Application.Current.Dispatcher.BeginInvoke(new Action(() => Application.Current.Windows.Cast<Window>().Single(w => w.GetType().Name == "ConfirmDialog").Close()));
-                Invoke(controller, "RemoveProfile", old);
+                ClickRemove();
                 Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Closing confirmation must preserve data");
                 escapeCancel = true;
-                Invoke(controller, "RemoveProfile", old);
+                ClickRemove();
                 escapeCancel = false;
                 Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Escape must preserve data");
                 confirm = true;
                 File.WriteAllText(paths.RemovedProfilesDirectory, "blocked");
-                Invoke(controller, "RemoveProfile", old);
+                ClickRemove();
                 Check(errors == 1 && service.ListProfiles().Count == 2 && manager.IsVisible, "File failure must show an owned error and keep app/profile alive");
                 File.Delete(paths.RemovedProfilesDirectory);
                 changeActive = true;
-                Invoke(controller, "RemoveProfile", old);
+                ClickRemove();
                 Check(errors == 2 && service.ListProfiles().Count == 2, "Active profile must be rechecked after confirmation");
                 changeActive = false;
                 active.Write("current");
-                Invoke(controller, "RemoveProfile", old);
+                startRecovery = true;
+                ClickRemove();
+                startRecovery = false;
+                Check(errors == 3 && rows.Items.Count == 2, "A pending operation started during confirmation must block removal");
+                int confirmations = dialogs;
+                ClickRemove();
+                Check(errors == 4 && dialogs == confirmations && rows.Items.Count == 2, "An existing pending operation must show an owned warning without confirmation");
+                Check(File.ReadAllText(pending) == "fixture pending journal" && metadata == File.ReadAllText(paths.ProfilesMetadataFile)
+                    && !Directory.Exists(paths.RemovedProfilesDirectory), "Blocked removal must preserve journal, metadata and profile");
+                File.Delete(pending);
+                ClickRemove();
                 Check(service.ListProfiles().Count == 1 && ((ListBox)Field(manager, "listBox")).Items.Count == 1, "Successful removal must rebuild the open profile manager");
                 Check(((IReadOnlyList<ProfileInfo>)Field(settingsWindow, "profiles")).Count == 1, "Open Settings must receive the updated list");
                 Check(!(bool)Field(controller, "accountOperation"), "Removal guard must reset after every outcome");
@@ -218,7 +237,7 @@ internal static class Program
             finally { timer.Stop(); }
         }
         finally { manager?.Close(); settingsWindow?.GetType().GetMethod("CloseForShutdown")!.Invoke(settingsWindow, null); ((IDisposable)controller).Dispose(); }
-        Console.WriteLine("PASS: removal confirmation/cancel, filesystem error, active-marker change, recovery, open Settings/manager refresh and operation guard.");
+        Console.WriteLine("PASS: removal menu, confirmation/cancel, filesystem error, active-marker change, pending Desktop recovery, open Settings/manager refresh and operation guard.");
     }
 
     private static void CheckLoginRuntime(string temp)

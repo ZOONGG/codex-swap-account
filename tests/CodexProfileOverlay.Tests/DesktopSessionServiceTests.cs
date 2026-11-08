@@ -279,16 +279,62 @@ public sealed class DesktopSessionServiceTests
         using var fixture = new Fixture();
         fixture.Capture("alpha", "a");
         fixture.Capture("beta", "b");
+        fixture.Layout.AddProfile("other", "fake-other-auth");
+        string recoveryRoot = Path.Combine(fixture.Paths.ApplicationDataDirectory, "desktop-recovery");
+        var priorRecovery = Directory.GetFiles(recoveryRoot, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, File.ReadAllBytes);
+        Assert.NotEmpty(priorRecovery);
         var manager = new ProfileManagerService(fixture.Paths, new ProfileDiscoveryService(fixture.Paths.ProfilesDirectory),
             new ProfileMetadataStore(fixture.Paths.ProfilesMetadataFile));
         Assert.Throws<InvalidOperationException>(() => manager.RemoveProfile("beta", null));
+        string metadata = File.ReadAllText(fixture.Paths.ProfilesMetadataFile);
+        Directory.CreateDirectory(fixture.Paths.ProfilesMetadataFile + ".tmp");
+        Assert.Throws<UnauthorizedAccessException>(() => manager.RemoveProfile("alpha", "beta"));
+        Directory.Delete(fixture.Paths.ProfilesMetadataFile + ".tmp");
+        Assert.Equal("a", fixture.Stored("alpha"));
+        Assert.Equal(metadata, File.ReadAllText(fixture.Paths.ProfilesMetadataFile));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.Paths.RemovedProfilesDirectory));
+
         string archive = manager.RemoveProfile("alpha", "beta");
         Assert.Equal("a", File.ReadAllText(Path.Combine(archive, "desktop-session", "Default", "fake-state")));
         Assert.True(File.Exists(Path.Combine(archive, "desktop-session.json")));
         Assert.Equal(Auth("a"), File.ReadAllText(Path.Combine(archive, "auth.json")));
+        Assert.DoesNotContain(manager.ListProfiles(), p => p.Name == "alpha");
+        Assert.Equal("fake-other-auth", fixture.Layout.ReadProfileAuth("other"));
+        Assert.Equal("history", File.ReadAllText(Path.Combine(fixture.Paths.SharedCodexDirectory, "history.txt")));
+        fixture.AssertCurrent("beta", "b", "b");
+        foreach (var (path, bytes) in priorRecovery) Assert.Equal(bytes, File.ReadAllBytes(path));
         fixture.Capture("alpha", "c");
         Assert.Contains(manager.ListProfiles(), p => p.Name == "alpha");
         fixture.AssertCurrent("alpha", "c", "c");
+    }
+
+    [Fact]
+    public void RemoveProfile_PendingSwitchPreservesJournalAndAllowsRollback()
+    {
+        using var fixture = new Fixture();
+        fixture.Capture("alpha", "a");
+        fixture.Capture("beta", "b");
+        fixture.Service.Switch("alpha", fixture.Live, CheckStopped, default);
+        string pending = Path.Combine(fixture.Paths.ApplicationDataDirectory, "desktop-recovery", "pending.json");
+        byte[] journal = File.ReadAllBytes(pending);
+        string metadata = File.ReadAllText(fixture.Paths.ProfilesMetadataFile);
+        var manager = new ProfileManagerService(fixture.Paths, new ProfileDiscoveryService(fixture.Paths.ProfilesDirectory),
+            new ProfileMetadataStore(fixture.Paths.ProfilesMetadataFile));
+
+        foreach (string name in new[] { "alpha", "beta" })
+        {
+            var error = Assert.Throws<InvalidOperationException>(() => manager.RemoveProfile(name, null));
+            Assert.Contains("Recover the pending Desktop session", error.Message);
+        }
+
+        Assert.Equal(journal, File.ReadAllBytes(pending));
+        Assert.Equal(metadata, File.ReadAllText(fixture.Paths.ProfilesMetadataFile));
+        Assert.False(Directory.Exists(fixture.Paths.RemovedProfilesDirectory));
+        fixture.AssertCurrent("alpha", "a", "a");
+        fixture.Service.Recover(fixture.Live, CheckStopped);
+        fixture.AssertCurrent("beta", "b", "b");
+        Assert.Equal("a", fixture.Stored("alpha"));
     }
 
     [Fact]
