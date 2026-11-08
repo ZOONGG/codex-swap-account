@@ -164,6 +164,43 @@ public sealed class AuthSwitchServiceTests
         Assert.Equal("current", temp.ActiveProfileStore.Read());
     }
 
+    [Fact]
+    public async Task SwitchAsync_WhenBackupCannotBeFinalized_PreservesCommittedAuthorization()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var temp = new TestLayout();
+        temp.AddProfile("current", "old-current-auth");
+        temp.AddProfile("target", "target-auth");
+        temp.WriteSharedAuth("fresh-current-auth");
+        temp.ActiveProfileStore.Write("current");
+        using var blocker = new BlockBackupFinalization(temp.Paths.BackupDirectory);
+
+        var error = await Assert.ThrowsAsync<AggregateException>(() => temp.CreateSwitchService(blocker).SwitchAsync("target"));
+        Assert.Collection(error.InnerExceptions, item => Assert.IsAssignableFrom<IOException>(item),
+            item => Assert.IsAssignableFrom<IOException>(item));
+
+        Assert.Equal("target-auth", temp.ReadSharedAuth());
+        Assert.Equal("target", temp.ActiveProfileStore.Read());
+        Assert.Single(Directory.GetDirectories(temp.Paths.BackupDirectory, "auth-pending-*"));
+        blocker.Dispose();
+        temp.CreateSwitchService().RecoverPendingSwitch();
+        Assert.Empty(Directory.GetDirectories(temp.Paths.BackupDirectory, "auth-pending-*"));
+    }
+
+    private sealed class BlockBackupFinalization(string root) : IAtomicFileReplacer, IDisposable
+    {
+        private FileStream? manifest;
+
+        public void ReplaceFromSource(string sourceFile, string destinationFile)
+        {
+            new AtomicFileReplacer().ReplaceFromSource(sourceFile, destinationFile);
+            string transaction = Directory.GetDirectories(root, "auth-pending-*").Single();
+            manifest ??= File.Open(Path.Combine(transaction, "manifest.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+
+        public void Dispose() => manifest?.Dispose();
+    }
+
     private sealed class FailSecondReplacement : IAtomicFileReplacer
     {
         private readonly AtomicFileReplacer inner = new();
@@ -174,7 +211,6 @@ public sealed class AuthSwitchServiceTests
             calls++;
             if (calls == 2)
             {
-                File.WriteAllText(destinationFile, "corrupted-before-failure");
                 throw new IOException("Simulated replacement failure.");
             }
             inner.ReplaceFromSource(sourceFile, destinationFile);

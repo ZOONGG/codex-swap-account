@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Fix profile removal crashing when a profiles junction and recovery folder are on different volumes. Preserve recovery data, roll back metadata failures, protect the active profile, and report removal errors without closing the app.
+- Keep login dialogs on a monitor work area in physical pixels, recover after display/DPI changes, prefer the active auxiliary owner, and make browser sign-in reachable from the taskbar. The exact two-monitor freeze in Issue #2 still requires reproduction on the reported setup.
+- Prevent nested Add profile prompts; check CLI availability before opening browser sign-in and report known CLI, missing-auth, permission and timeout failures without recording credentials or CLI output.
+- Bound login cleanup and cancel pipe reads when the CLI exits, including when a child retains stdout/stderr. Preserve the login window when active-account reauthorization closes Codex.
+- Synchronize all three READMEs with stable v1.1.0 downloads, Inno Setup installation, isolated browser sign-in and current usage/status presentation.
+
+### Added
+- Simplified Chinese interface localization, selectable in Settings → Language and used automatically on Chinese Windows.
+- Simplified Chinese in the Windows installer: the setup wizard, update prompts, and error messages are translated, and `简体中文` is offered in the language dialog. Setup still starts in English (language auto-detection is disabled), so existing English/Russian installs and silent updates behave exactly as before.
+- `README_ZH.md` with a full Simplified Chinese project guide.
+
+### Changed
+- The Support window, usage countdowns, refresh errors, and the support button labels now follow the selected language instead of an English/Russian toggle.
+
 ## 1.1.0 - 2026-10-12
 
 ### Added

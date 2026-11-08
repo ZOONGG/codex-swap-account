@@ -1,6 +1,6 @@
 using System.Windows;
 using System.Windows.Interop;
-using System.Windows.Media;
+using CodexProfileOverlay.Core.Services;
 using Forms = System.Windows.Forms;
 
 namespace CodexProfileOverlay;
@@ -9,33 +9,51 @@ internal static class DialogPlacement
 {
     public static void CenterOnOwnerScreen(Window dialog, Window? owner, IntPtr nativeOwner)
     {
-        IntPtr ownerHandle = nativeOwner;
-        if (owner is not null)
+        dialog.WindowStartupLocation = WindowStartupLocation.Manual;
+        IntPtr ownerHandle = owner is not null ? new WindowInteropHelper(owner).EnsureHandle() : nativeOwner;
+        if (ownerHandle != IntPtr.Zero && NativeMethods.IsIconic(ownerHandle))
+            NativeMethods.ShowWindow(ownerHandle, NativeMethods.SwRestore);
+        IntPtr handle = new WindowInteropHelper(dialog).EnsureHandle();
+        var source = HwndSource.FromHwnd(handle);
+        bool queued = false;
+
+        void Place(bool center)
         {
-            ownerHandle = new WindowInteropHelper(owner).EnsureHandle();
+            if (!NativeMethods.GetWindowRect(handle, out var rect)) return;
+            var screen = center
+                ? ownerHandle != IntPtr.Zero ? Forms.Screen.FromHandle(ownerHandle) : Forms.Screen.FromPoint(Forms.Cursor.Position)
+                : Forms.Screen.FromHandle(handle);
+            var area = screen.WorkingArea;
+            var bounds = WindowScreenBounds.Place(area.Left, area.Top, area.Width, area.Height,
+                rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top, center);
+            // Desktop coordinates are physical pixels. Scaling their absolute origin using
+            // this HWND's DPI is incorrect on mixed-DPI desktops. Windows handles the DPI move.
+            NativeMethods.SetWindowPos(handle, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height,
+                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
         }
 
-        _ = new WindowInteropHelper(dialog).EnsureHandle();
-        Forms.Screen screen = ownerHandle != IntPtr.Zero
-            ? Forms.Screen.FromHandle(ownerHandle)
-            : Forms.Screen.FromPoint(Forms.Cursor.Position);
-
-        Rect workArea = DeviceToDip(dialog, screen.WorkingArea);
-        dialog.Left = workArea.Left + Math.Max(0, (workArea.Width - dialog.Width) / 2);
-        dialog.Top = workArea.Top + Math.Max(0, (workArea.Height - dialog.Height) / 2);
-    }
-
-    private static Rect DeviceToDip(Window window, System.Drawing.Rectangle rectangle)
-    {
-        HwndSource? source = (HwndSource?)PresentationSource.FromVisual(window);
-        if (source?.CompositionTarget is null)
+        IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
-            return new Rect(rectangle.Left, rectangle.Top, rectangle.Width, rectangle.Height);
+            // Wait for WPF to apply DPI/layout changes before checking the new work area.
+            if ((message is 0x007E or 0x001A or 0x02E0) && !queued)
+            {
+                queued = true;
+                dialog.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    queued = false;
+                    if (dialog.IsVisible) Place(false);
+                }));
+            }
+            return IntPtr.Zero;
         }
 
-        Matrix transform = source.CompositionTarget.TransformFromDevice;
-        Point topLeft = transform.Transform(new Point(rectangle.Left, rectangle.Top));
-        Point bottomRight = transform.Transform(new Point(rectangle.Right, rectangle.Bottom));
-        return new Rect(topLeft, bottomRight);
+        source?.AddHook(Hook);
+        void OnRendered(object? sender, EventArgs args)
+        {
+            dialog.ContentRendered -= OnRendered;
+            if (dialog.IsVisible) { Place(true); dialog.Activate(); }
+        }
+        dialog.ContentRendered += OnRendered;
+        dialog.Closed += (_, _) => source?.RemoveHook(Hook);
     }
 }

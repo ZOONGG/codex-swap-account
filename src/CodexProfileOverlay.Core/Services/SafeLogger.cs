@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -26,14 +28,30 @@ public sealed class SafeLogger
     {
         string sanitized = Sanitize(message);
         string line = $"{DateTimeOffset.Now:O} {level} {sanitized}";
-        if (exception is not null)
+        var causes = new Queue<Exception>();
+        if (exception is not null) causes.Enqueue(exception);
+        for (int depth = 0; depth < 5 && causes.TryDequeue(out var cause); depth++)
         {
-            line += $" | {exception.GetType().Name}: {Sanitize(exception.Message)}";
+            // Exception messages and stack traces can contain paths, URLs and credential data.
+            line += $" | {cause.GetType().Name} [HRESULT=0x{cause.HResult:X8}]";
+            if (cause is Win32Exception native) line += $" [NativeErrorCode={native.NativeErrorCode}]";
+            if (cause is AggregateException aggregate)
+            {
+                foreach (Exception inner in aggregate.InnerExceptions.Take(5)) causes.Enqueue(inner);
+            }
+            else if (cause.InnerException is { } inner) causes.Enqueue(inner);
         }
 
-        lock (gate)
+        try
         {
-            File.AppendAllText(logFile, line + Environment.NewLine, new UTF8Encoding(false));
+            lock (gate)
+            {
+                File.AppendAllText(logFile, line + Environment.NewLine, new UTF8Encoding(false));
+            }
+        }
+        catch (Exception loggingError) when (loggingError is IOException or UnauthorizedAccessException)
+        {
+            Trace.WriteLine("Could not write the overlay diagnostic log.");
         }
     }
 

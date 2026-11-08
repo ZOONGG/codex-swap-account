@@ -21,8 +21,7 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
     };
 
     internal static bool IsProtectedProcess(string name, string? family, bool officialDesktop) => !officialDesktop
-        && (ProtectedNames.Contains(name) || (family?.StartsWith("OpenAI.", StringComparison.OrdinalIgnoreCase) == true
-            && !family.Equals(OfficialCodexDesktopIdentity.PackageFamily, StringComparison.OrdinalIgnoreCase)));
+        && (ProtectedNames.Contains(name) || !string.Equals(family, OfficialCodexDesktopIdentity.PackageFamily, StringComparison.OrdinalIgnoreCase));
     public IReadOnlyList<DesktopProcessEntry> Snapshot()
     {
         using SafeFileHandle snapshot = CreateToolhelp32Snapshot(2, 0);
@@ -85,8 +84,9 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
             uint size = (uint)path.Capacity;
             if (!QueryFullProcessImageName(handle, 0, path, ref size))
             {
+                int error = Marshal.GetLastPInvokeError();
                 if (ExitedAt is not null) { IsProtected = true; return; }
-                throw new Win32Exception(Marshal.GetLastWin32Error());
+                throw new Win32Exception(error);
             }
 
             string? family = ReadPackageString(handle, GetPackageFamilyName);
@@ -110,7 +110,9 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
                     .Any(executable => OfficialCodexDesktopIdentity.IsOfficial(family, root, path.ToString(), executable));
             }
             string name = Path.GetFileNameWithoutExtension(path.ToString());
-            IsProtected = IsProtectedProcess(name, family, IsOfficialDesktop);
+            IsProtected = IsProtectedProcess(name, family, IsOfficialDesktop)
+                || (!IsOfficialDesktop && (root is null || !path.ToString().StartsWith(
+                    Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)));
         }
 
         public void RequestClose()
@@ -119,6 +121,7 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
             try
             {
                 using var process = Process.GetProcessById(Id);
+                if (process.StartTime.ToUniversalTime().ToFileTimeUtc() != StartedAt.ToFileTime() || ExitedAt is not null) return;
                 _ = process.CloseMainWindow();
             }
             catch (Exception exception) when ((exception is ArgumentException or InvalidOperationException or Win32Exception)
@@ -129,16 +132,19 @@ internal sealed class WindowsDesktopProcessCatalog : IDesktopProcessCatalog
         public void Terminate()
         {
             if (ExitedAt is not null || IsProtected) return;
-            using SafeProcessHandle terminateHandle = OpenProcess(0x1001, false, Id); // TERMINATE | QUERY_LIMITED_INFORMATION
+            using SafeProcessHandle terminateHandle = OpenProcess(0x00101001, false, Id); // SYNCHRONIZE | QUERY_LIMITED_INFORMATION | TERMINATE
             if (terminateHandle.IsInvalid)
             {
+                int openError = Marshal.GetLastPInvokeError();
                 if (ExitedAt is not null) return;
-                throw new Win32Exception(Marshal.GetLastWin32Error());
+                throw new Win32Exception(openError);
             }
-            if (!GetProcessTimes(terminateHandle, out long created, out _, out _, out _)
-                || DateTimeOffset.FromFileTime(created) != StartedAt)
+            var verified = new WindowsProcessHandle(Id, terminateHandle);
+            if (verified.StartedAt != StartedAt || verified.IsProtected || verified.IsOfficialDesktop != IsOfficialDesktop)
                 throw new InvalidOperationException("Process identity changed during shutdown.");
-            if (!TerminateProcess(terminateHandle, 1) && ExitedAt is null) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (TerminateProcess(terminateHandle, 1)) return;
+            int error = Marshal.GetLastPInvokeError();
+            if (ExitedAt is null) throw new Win32Exception(error, "Windows refused to terminate a verified Codex process.");
         }
 
         public void Dispose() => handle.Dispose();

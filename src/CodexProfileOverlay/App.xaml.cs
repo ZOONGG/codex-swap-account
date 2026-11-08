@@ -90,7 +90,9 @@ public partial class App : Application
                 : AppTheme.Dark;
             LanguagePreference language = e.Args.Contains("--ru", StringComparer.OrdinalIgnoreCase)
                 ? LanguagePreference.Russian
-                : LanguagePreference.English;
+                : e.Args.Contains("--zh", StringComparer.OrdinalIgnoreCase)
+                    ? LanguagePreference.Chinese
+                    : LanguagePreference.English;
             ApplyTheme(theme);
             var supportWindow = new SupportWindow(theme, language) { ShowInTaskbar = true };
             string? outputPath = ArgumentValue(e.Args, "--output=");
@@ -156,8 +158,9 @@ public partial class App : Application
             var activeProfileStore = new ActiveProfileStore(paths.ActiveProfileFile);
             var settingsService = new SettingsService(paths.SettingsFile);
             var backupMaintenance = new BackupMaintenanceService(paths, logger);
-            backupMaintenance.CleanupRetention();
             var switchService = new AuthSwitchService(paths, profileDiscovery, activeProfileStore, backups: backupMaintenance);
+            switchService.RecoverPendingSwitch();
+            backupMaintenance.TryCleanupRetention();
             var processService = new CodexProcessService(logger);
             controller = new OverlayController(
                 paths,

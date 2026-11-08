@@ -1,4 +1,6 @@
-# Update checker verification
+# Update checker verification (v1.0.0 prototype)
+
+This page records the original verification fixture. For current installer and update behavior, see [Windows installer and updates](windows-installer-updates.md).
 
 The update card is in Settings > Advanced. A dot on Advanced indicates an available release. Startup checks use public GitHub metadata, run asynchronously, and are limited to one attempt per 24 hours (including unsuccessful attempts). Manual checks bypass the time limit. Successful metadata survives offline failures. No popup notifications are generated.
 

@@ -13,6 +13,8 @@ internal static class Program
 {
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr handle);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(IntPtr handle);
 
     [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowStyle(IntPtr handle, int index);
@@ -36,6 +38,22 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Contains("--hold-login-pipes")) { Thread.Sleep(10000); return; }
+        if (args.Contains("login") && args.Contains("-c"))
+        {
+            string mode = File.ReadAllText("fixture-mode.txt");
+            if (mode == "wait") Thread.Sleep(10000);
+            if (mode == "fail") { Environment.ExitCode = 7; return; }
+            if (mode == "success") File.WriteAllText("auth.json", "FAKE TEST AUTH ONLY");
+            if (mode == "pipes")
+            {
+                var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!)
+                { Arguments = "--hold-login-pipes", UseShellExecute = false, CreateNoWindow = true })!;
+                File.WriteAllText("fixture-child.txt", child.Id.ToString());
+                child.Dispose();
+            }
+            return;
+        }
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var source = System.Xml.Linq.XDocument.Load(Path.Combine(AppContext.BaseDirectory, "AppResources.xaml"));
         System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
@@ -47,23 +65,313 @@ internal static class Program
         Directory.CreateDirectory(temp);
         try
         {
+            if (args.Contains("--removal-only")) { CheckRemoval(temp); return; }
+            if (args.Contains("--login-only")) { CheckLoginRuntime(temp); return; }
+            if (args.Contains("--dialogs-only"))
+                foreach (var screen in System.Windows.Forms.Screen.AllScreens)
+                    Console.WriteLine($"Monitor: {screen.DeviceName}, bounds={screen.Bounds}, workArea={screen.WorkingArea}, primary={screen.Primary}");
             foreach (var theme in new[] { AppTheme.Dark, AppTheme.Light })
-            foreach (var language in new[] { LanguagePreference.English, LanguagePreference.Russian })
+            foreach (var language in new[] { LanguagePreference.English, LanguagePreference.Russian, LanguagePreference.Chinese })
             {
                 App.ApplyTheme(theme);
+                if (args.Contains("--dialogs-only"))
+                {
+                    foreach (var screen in System.Windows.Forms.Screen.AllScreens) CheckLoginDialogs(language, screen);
+                    continue;
+                }
                 if (args.Contains("--hover-only")) { CheckPopup(temp, language); continue; }
-                CheckSettings(temp, theme, language);
+                CheckSettings(temp, theme, language, args.Contains("--localization-only"));
                 CheckProfileManager(language);
                 CheckAmounts(theme, language);
                 CheckPopup(temp, language);
             }
-            if (args.Contains("--hover-only")) { Console.WriteLine("PASS: Hover open/leave, popup entry, profile replacement, card click isolation and dimensions, bottom placement in expanded/compact, dark/light and RU/EN."); return; }
-            Console.WriteLine("PASS: Update card portable/installed/ready/progress; hover/bottom popup; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto input; dark/light and RU/EN.");
+            if (args.Contains("--dialogs-only")) { Console.WriteLine("PASS: prompt modal ownership, progress cancellation/reopen, physical bounds and display-change recovery; EN/RU/ZH, dark/light. Physical multi-monitor scenario still requires manual testing."); return; }
+            if (args.Contains("--localization-only")) { Console.WriteLine("PASS: language combo switches EN/RU/ZH, settings retained, profile manager, support amounts and usage cards; dark/light."); return; }
+            if (args.Contains("--hover-only")) { Console.WriteLine("PASS: Hover open/leave, popup entry, profile replacement, card click isolation and dimensions, bottom placement in expanded/compact, dark/light and EN/RU/ZH."); return; }
+            Console.WriteLine("PASS: Update card portable/installed/ready/progress; hover/bottom popup; auxiliary chrome/close/reopen/maximize; header focus; Stars/Crypto input; dark/light and EN/RU/ZH.");
         }
         finally { app.Shutdown(); Directory.Delete(temp, true); }
     }
 
-    private static void CheckSettings(string temp, AppTheme theme, LanguagePreference language)
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetActiveWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
+    private static void CheckRemoval(string temp)
+    {
+        var assembly = typeof(App).Assembly;
+        var paths = new AppPaths(temp, temp);
+        Directory.CreateDirectory(paths.ProfilesDirectory);
+        foreach (string name in new[] { "current", "old" })
+        {
+            Directory.CreateDirectory(Path.Combine(paths.ProfilesDirectory, name));
+            File.WriteAllText(Path.Combine(paths.ProfilesDirectory, name, "auth.json"), "FAKE TEST AUTH");
+        }
+        var service = new ProfileManagerService(paths, new ProfileDiscoveryService(paths.ProfilesDirectory), new ProfileMetadataStore(paths.ProfilesMetadataFile));
+        service.EnsureMetadata();
+        var active = new ActiveProfileStore(paths.ActiveProfileFile);
+        active.Write("current");
+        object controller = Activator.CreateInstance(assembly.GetType("CodexProfileOverlay.OverlayController")!, paths, service, active,
+            new SettingsService(paths.SettingsFile), null!, null!, null!, new SafeLogger(paths.LogDirectory), new BackupMaintenanceService(paths))!;
+        Window? manager = null;
+        Window? settingsWindow = null;
+        Task Remove(ProfileInfo profile) => (Task)Invoke(controller, "RemoveProfileAsync", profile)!;
+        Task? removal = null;
+        try
+        {
+            var localizerType = assembly.GetType("CodexProfileOverlay.Localizer")!;
+            object localizer = Activator.CreateInstance(localizerType, LanguagePreference.English)!;
+            var ctor = assembly.GetType("CodexProfileOverlay.ProfileManagerWindow")!.GetConstructors().Single();
+            object?[] args = ctor.GetParameters().Select(p =>
+                p.ParameterType == typeof(IReadOnlyList<ProfileInfo>) ? (object)service.ListProfiles() :
+                p.ParameterType == typeof(string) ? "current" :
+                p.ParameterType == localizerType ? localizer :
+                p.Name == "removeProfile" ? (Action<ProfileInfo>)(profile => removal = Remove(profile)) :
+                p.ParameterType == typeof(Action<ProfileInfo>) ? (Action<ProfileInfo>)(_ => { }) :
+                p.ParameterType == typeof(Action<IReadOnlyList<string>>) ? (Action<IReadOnlyList<string>>)(_ => { }) :
+                p.ParameterType == typeof(Func<ProfileInfo, AccountAvailability>) ? (Func<ProfileInfo, AccountAvailability>)(_ => default) :
+                (object)(Action)(() => { })).ToArray();
+            manager = (Window)ctor.Invoke(args);
+            controller.GetType().GetField("profileManagerWindow", Private)!.SetValue(controller, manager);
+            var settingsCtor = assembly.GetType("CodexProfileOverlay.SettingsWindow")!.GetConstructors().Single();
+            object[] settingsArgs = settingsCtor.GetParameters().Select(p =>
+                p.ParameterType == typeof(OverlaySettings) ? (object)new OverlaySettings() :
+                p.ParameterType == typeof(IReadOnlyList<ProfileInfo>) ? service.ListProfiles() :
+                p.ParameterType == localizerType ? localizer :
+                p.ParameterType == typeof(ProfileStatusService) ? Field(controller, "statusService") :
+                p.ParameterType == typeof(BackupMaintenanceService) ? new BackupMaintenanceService(paths) :
+                p.ParameterType == typeof(UpdateService) ? Field(controller, "updates") :
+                p.ParameterType == typeof(Action<OverlaySettings>) ? (Action<OverlaySettings>)(_ => { }) :
+                p.ParameterType == typeof(Func<string, Task>) ? (Func<string, Task>)(_ => Task.CompletedTask) :
+                p.ParameterType == typeof(Func<string, Task<bool>>) ? (Func<string, Task<bool>>)(_ => Task.FromResult(false)) :
+                p.ParameterType == typeof(Func<bool>) ? (Func<bool>)(() => true) :
+                p.ParameterType == typeof(Action<bool>) ? (Action<bool>)(_ => { }) : (Action)(() => { })).ToArray();
+            settingsWindow = (Window)settingsCtor.Invoke(settingsArgs);
+            controller.GetType().GetField("settingsWindow", Private)!.SetValue(controller, settingsWindow);
+            settingsWindow.Show();
+            manager.Show();
+            var rows = (ListBox)Field(manager, "listBox");
+            MenuItem RemoveItem(string name)
+            {
+                var row = rows.Items.OfType<ListBoxItem>().Single(i => ((ProfileInfo)i.Tag).Name == name);
+                return Descendants(row).OfType<Button>().Single().ContextMenu!.Items.OfType<MenuItem>().Last();
+            }
+            void ClickRemove()
+            {
+                removal = null;
+                RemoveItem("old").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                Check(removal is { IsCompleted: true }, "Removal must finish with no background writer in the fixture");
+                removal!.GetAwaiter().GetResult();
+            }
+            Check(!RemoveItem("current").IsEnabled, "Active profile removal must be disabled");
+            int dialogs = 0, errors = 0;
+            bool confirm = false;
+            bool changeActive = false;
+            bool startRecovery = false;
+            bool escapeCancel = false;
+            string pending = Path.Combine(paths.ApplicationDataDirectory, "desktop-recovery", "pending.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(pending)!);
+            var watchdog = System.Diagnostics.Stopwatch.StartNew();
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+            timer.Tick += (_, _) =>
+            {
+                Check(watchdog.Elapsed < TimeSpan.FromSeconds(15), "Removal UI scenario timed out");
+                var dialog = Application.Current.Windows.Cast<Window>().FirstOrDefault(w => w.GetType().Name == "ConfirmDialog" && w.IsVisible);
+                if (dialog is not null)
+                {
+                    dialogs++;
+                    Check(ReferenceEquals(dialog.Owner, manager), "Removal confirmation must belong to profile manager");
+                    // A nested UI action must not enter a second removal during confirmation.
+                    Task nested = Remove(service.ListProfiles().Single(p => p.Name == "current"));
+                    Check(nested.IsCompletedSuccessfully, "Nested removal must return immediately");
+                    if (escapeCancel)
+                    {
+                        dialog.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
+                            PresentationSource.FromVisual(dialog)!, 0, System.Windows.Input.Key.Escape) { RoutedEvent = System.Windows.Input.Keyboard.KeyDownEvent });
+                        return;
+                    }
+                    if (changeActive) active.Write("old");
+                    if (startRecovery) File.WriteAllText(pending, "fixture pending journal");
+                    Invoke(Descendants(dialog).OfType<Button>().Single(b => confirm ? b.IsDefault : Equals(b.Content, "Cancel")), "OnClick");
+                    return;
+                }
+                var hwnd = GetActiveWindow();
+                if (hwnd != IntPtr.Zero && GetWindow(hwnd, 4) == new System.Windows.Interop.WindowInteropHelper(manager).Handle)
+                {
+                    errors++;
+                    SendMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero);
+                }
+            };
+            timer.Start();
+            try
+            {
+                string metadata = File.ReadAllText(paths.ProfilesMetadataFile);
+                ClickRemove();
+                Check(dialogs == 1 && errors == 0 && service.ListProfiles().Count == 2, "Cancel must preserve profiles");
+                Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Cancel must perform no writes");
+                // Closing the confirmation with X/Close is also cancellation.
+                Application.Current.Dispatcher.BeginInvoke(new Action(() => Application.Current.Windows.Cast<Window>().Single(w => w.GetType().Name == "ConfirmDialog").Close()));
+                ClickRemove();
+                Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Closing confirmation must preserve data");
+                escapeCancel = true;
+                ClickRemove();
+                escapeCancel = false;
+                Check(metadata == File.ReadAllText(paths.ProfilesMetadataFile) && !Directory.Exists(paths.RemovedProfilesDirectory), "Escape must preserve data");
+                confirm = true;
+                File.WriteAllText(paths.RemovedProfilesDirectory, "blocked");
+                ClickRemove();
+                Check(errors == 1 && service.ListProfiles().Count == 2 && manager.IsVisible, "File failure must show an owned error and keep app/profile alive");
+                File.Delete(paths.RemovedProfilesDirectory);
+                changeActive = true;
+                ClickRemove();
+                Check(errors == 2 && service.ListProfiles().Count == 2, "Active profile must be rechecked after confirmation");
+                changeActive = false;
+                active.Write("current");
+                startRecovery = true;
+                ClickRemove();
+                startRecovery = false;
+                Check(errors == 3 && rows.Items.Count == 2, "A pending operation started during confirmation must block removal");
+                int confirmations = dialogs;
+                ClickRemove();
+                Check(errors == 4 && dialogs == confirmations && rows.Items.Count == 2, "An existing pending operation must show an owned warning without confirmation");
+                Check(File.ReadAllText(pending) == "fixture pending journal" && metadata == File.ReadAllText(paths.ProfilesMetadataFile)
+                    && !Directory.Exists(paths.RemovedProfilesDirectory), "Blocked removal must preserve journal, metadata and profile");
+                File.Delete(pending);
+                ClickRemove();
+                Check(service.ListProfiles().Count == 1 && ((ListBox)Field(manager, "listBox")).Items.Count == 1, "Successful removal must rebuild the open profile manager");
+                Check(((IReadOnlyList<ProfileInfo>)Field(settingsWindow, "profiles")).Count == 1, "Open Settings must receive the updated list");
+                Check(!(bool)Field(controller, "accountOperation"), "Removal guard must reset after every outcome");
+                Check(Directory.GetFiles(paths.RemovedProfilesDirectory, "auth.json", SearchOption.AllDirectories).Length == 1, "Recovery must preserve saved login");
+            }
+            finally { timer.Stop(); }
+        }
+        finally { manager?.Close(); settingsWindow?.GetType().GetMethod("CloseForShutdown")!.Invoke(settingsWindow, null); ((IDisposable)controller).Dispose(); }
+        Console.WriteLine("PASS: removal menu, confirmation/cancel, filesystem error, active-marker change, pending Desktop recovery, open Settings/manager refresh and operation guard.");
+    }
+
+    private static void CheckLoginRuntime(string temp)
+    {
+        var runtime = new OfficialProfileLoginRuntime(() => Environment.ProcessPath);
+        runtime.EnsureAvailable();
+        foreach (string mode in new[] { "fail", "missing", "success", "wait", "pipes", "success" })
+        {
+            string directory = Path.Combine(temp, mode + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "fixture-mode.txt"), mode);
+            using var cancellation = new CancellationTokenSource();
+            if (mode == "wait") cancellation.CancelAfter(500);
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                bool result = runtime.LoginAsync(directory, cancellation.Token).GetAwaiter().GetResult();
+                Check(mode == "success" && result, "Only successful login may return true");
+            }
+            catch (LoginProcessFailedException) { Check(mode == "fail", "Typed CLI failure"); }
+            catch (LoginAuthMissingException) { Check(mode is "missing" or "pipes", "Typed missing authorization"); }
+            catch (OperationCanceledException) { Check(mode == "wait", "Cancellation terminates CLI"); }
+            finally
+            {
+                string childFile = Path.Combine(directory, "fixture-child.txt");
+                if (File.Exists(childFile))
+                {
+                    try { using var child = System.Diagnostics.Process.GetProcessById(int.Parse(File.ReadAllText(childFile))); child.Kill(true); child.WaitForExit(5000); }
+                    catch (ArgumentException) { }
+                }
+            }
+            Check(timer.Elapsed < TimeSpan.FromSeconds(5), "Login cleanup must be bounded, even with inherited pipes");
+        }
+        Console.WriteLine("PASS: real subprocess exit failure, missing auth, success, timeout/cancel, inherited pipes, retry; fake credentials only.");
+    }
+
+    private static void CheckLoginDialogs(LanguagePreference language, System.Windows.Forms.Screen screen)
+    {
+        var assembly = typeof(App).Assembly;
+        var localizer = Activator.CreateInstance(assembly.GetType("CodexProfileOverlay.Localizer")!, language)!;
+        var placement = assembly.GetType("CodexProfileOverlay.DialogPlacement")!.GetMethod("CenterOnOwnerScreen")!;
+        var owner = new Window { Width = 600, Height = 400, ShowInTaskbar = false };
+        owner.Show();
+        SetWindowPos(new System.Windows.Interop.WindowInteropHelper(owner).Handle, IntPtr.Zero,
+            screen.WorkingArea.Left + 100, screen.WorkingArea.Top + 100, 0, 0, 0x15);
+        try
+        {
+            foreach (bool native in new[] { false, true })
+            {
+                if (native) owner.WindowState = WindowState.Minimized;
+                Exception? failure = null;
+                var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+                timer.Tick += (_, _) =>
+                {
+                    timer.Stop();
+                    var prompt = Application.Current.Windows.Cast<Window>().Single(w => w.GetType().Name == "PromptDialog");
+                    try
+                    {
+                        CheckVisible(prompt);
+                        Check(System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(prompt).Handle).DeviceName == screen.DeviceName,
+                            "Prompt must open on its owner's monitor");
+                        Check(!IsWindowEnabled(new System.Windows.Interop.WindowInteropHelper(owner).Handle), "ShowDialog must disable the native owner while prompt remains reachable");
+                        if (!native) Check(prompt.Owner == owner, "Managed prompt owner must be preserved");
+                    }
+                    catch (Exception e) { failure = e; }
+                    finally { prompt.DialogResult = false; }
+                };
+                timer.Start();
+                var method = assembly.GetType("CodexProfileOverlay.PromptDialog")!.GetMethod("Show", BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)!;
+                var result = method.Invoke(null, new object?[] { native ? null : owner,
+                    native ? new System.Windows.Interop.WindowInteropHelper(owner).Handle : IntPtr.Zero,
+                    "Prompt", "Profile", "", "OK", "Cancel" });
+                if (failure is not null) throw failure;
+                Check(result is null && IsWindowEnabled(new System.Windows.Interop.WindowInteropHelper(owner).Handle), "Cancel restores modal owner");
+            }
+            for (int i = 0; i < 2; i++)
+            {
+                using var token = new CancellationTokenSource();
+                var progress = (Window)Activator.CreateInstance(assembly.GetType("CodexProfileOverlay.LoginProgressWindow")!,
+                    localizer, token, "BrowserLogin", "LoginWaiting")!;
+                progress.Owner = owner;
+                placement.Invoke(null, new object?[] { progress, owner, IntPtr.Zero });
+                progress.Show(); progress.UpdateLayout();
+                PumpDispatcher(progress);
+                CheckVisible(progress);
+                Check(System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(progress).Handle).DeviceName == screen.DeviceName,
+                    "Login must open on its owner's monitor");
+                var hwnd = new System.Windows.Interop.WindowInteropHelper(progress).Handle;
+                SetWindowPos(hwnd, IntPtr.Zero, 30000, -30000, 0, 0, 0x15);
+                SendMessage(hwnd, 0x007E, IntPtr.Zero, IntPtr.Zero);
+                PumpDispatcher(progress);
+                CheckVisible(progress);
+                progress.Close();
+                Check(token.IsCancellationRequested && !progress.IsVisible, "Closing progress cancels and removes the window");
+            }
+        }
+        finally { owner.Close(); }
+    }
+
+    private static void PumpDispatcher(Window window)
+    {
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            new Action(() => frame.Continue = false));
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RectPixels { public int Left, Top, Right, Bottom; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RectPixels rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
+    private static void CheckVisible(Window window)
+    {
+        var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        Check(IsWindowVisible(handle) && GetWindowRect(handle, out var _), "Dialog HWND must be visible");
+        GetWindowRect(handle, out var rect);
+        var area = System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
+        Check(rect.Left >= area.Left && rect.Top >= area.Top && rect.Right <= area.Right && rect.Bottom <= area.Bottom,
+            "Dialog must fit its physical monitor work area");
+    }
+
+    private static void CheckSettings(string temp, AppTheme theme, LanguagePreference language, bool localizationOnly = false)
     {
         var assembly = typeof(App).Assembly;
         var paths = new AppPaths(temp, temp);
@@ -82,6 +390,7 @@ internal static class Program
             p.ParameterType == typeof(UpdateService) ? updates :
             p.ParameterType == typeof(Action<OverlaySettings>) ? (Action<OverlaySettings>)(_ => { }) :
             p.ParameterType == typeof(Func<string, Task>) ? (Func<string, Task>)(_ => Task.CompletedTask) :
+            p.ParameterType == typeof(Func<string, Task<bool>>) ? (Func<string, Task<bool>>)(_ => Task.FromResult(false)) :
             p.ParameterType == typeof(Func<bool>) ? (Func<bool>)(() => true) :
             p.ParameterType == typeof(Action<bool>) ? (Action<bool>)(_ => { }) :
             (Action)(() => { })).ToArray();
@@ -89,6 +398,23 @@ internal static class Program
         window.ShowInTaskbar = false;
         window.Show();
         window.UpdateLayout();
+        if (localizationOnly)
+        {
+            foreach (var selected in new[] { LanguagePreference.English, LanguagePreference.Russian, LanguagePreference.Chinese, language })
+            {
+                var page = (UIElement)Invoke(window, "BuildLanguagePage")!;
+                var host = (Grid)Field(window, "contentHost");
+                host.Children.Clear(); host.Children.Add(page); window.UpdateLayout();
+                var combo = Descendants(page).OfType<ComboBox>().Single();
+                combo.SelectedValue = selected;
+                Check(settings.Language == selected, "Language combo must update settings");
+                Check((LanguagePreference)localizerType.GetProperty("Language")!.GetValue(localizer)! == selected,
+                    "Language change must reach the localizer");
+                Check(settings.Theme == theme, "Language changes must retain the theme");
+            }
+            window.GetType().GetMethod("CloseForShutdown")!.Invoke(window, null);
+            return;
+        }
         double width = window.Width, height = window.Height, left = window.Left, top = window.Top;
         window.Close();
         Check(!window.IsVisible && !IsWindowVisible(new System.Windows.Interop.WindowInteropHelper(window).Handle), "Settings X must hide native window");

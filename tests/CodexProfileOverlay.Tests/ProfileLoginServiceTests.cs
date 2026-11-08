@@ -214,6 +214,49 @@ public sealed class ProfileLoginServiceTests
         Assert.Null(CodexCliLocator.FindExecutable(temp.Path, null));
     }
 
+    [Fact]
+    public void RuntimePreflightFailsBeforeCreatingAnyLoginState()
+    {
+        var runtime = new OfficialProfileLoginRuntime(() => null);
+        Assert.Throws<LoginRuntimeUnavailableException>(runtime.EnsureAvailable);
+    }
+
+    [Fact]
+    public async Task RuntimeStartFailureIsTypedAndDoesNotPublishAuth()
+    {
+        using var temp = new TempDirectory();
+        string executable = Path.Combine(temp.Path, "missing.exe");
+        File.WriteAllText(executable, "fake executable");
+        var runtime = new OfficialProfileLoginRuntime(() => executable);
+        runtime.EnsureAvailable();
+        File.Delete(executable); // It can disappear between preflight and process start.
+        await Assert.ThrowsAsync<LoginRuntimeUnavailableException>(() => runtime.LoginAsync(temp.Path, default));
+        Assert.False(File.Exists(Path.Combine(temp.Path, "auth.json")));
+    }
+
+    [Fact]
+    public async Task CancellationAndRetryReleaseGateAndPreserveSharedData()
+    {
+        using var layout = new TestLayout();
+        layout.AddProfile("existing", "fake-old");
+        layout.WriteSharedAuth("fake-shared");
+        layout.WriteSharedState("history");
+        int attempts = 0;
+        var runtime = new Runtime(async (directory, token) =>
+        {
+            if (++attempts == 1) await Task.Delay(Timeout.Infinite, token);
+            File.WriteAllText(Path.Combine(directory, "auth.json"), "fake-new");
+            return true;
+        });
+        var service = new ProfileLoginService(layout.Paths, Manager(layout), runtime);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.LoginAsync("new", false, null, cancellation.Token));
+        Assert.True(await service.LoginAsync("new", false, null, default));
+        Assert.Equal("fake-old", layout.ReadProfileAuth("existing"));
+        Assert.Equal("fake-shared", layout.ReadSharedAuth());
+        Assert.Empty(Directory.GetDirectories(Path.Combine(layout.Paths.ApplicationDataDirectory, "login-staging")));
+    }
+
     [Theory]
     [InlineData(null, AccountAvailability.Unknown)]
     [InlineData("invalid", AccountAvailability.Unknown)]

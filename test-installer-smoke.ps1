@@ -2,7 +2,9 @@ param(
     [string]$InnoCompiler = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
     [string]$PublishedPayload = "",
     [string]$PreviousPayload = "",
-    [string]$TargetVersion = "1.0.1"
+    [string]$TargetVersion = "1.0.1",
+    [string]$PreviousVersion = "1.0.0",
+    [string]$SetupLanguage = "english"
 )
 $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
@@ -27,6 +29,8 @@ $script = $script.Replace('Local\CodexProfileOverlay', "Local\$identity")
 $script = [regex]::Replace($script, '(?ms)^\[Icons\].*?(?=^\[Code\])', '')
 $icon = Join-Path $repo 'src\CodexProfileOverlay\Assets\AppIcon.ico'
 $script = [regex]::Replace($script, '(?m)^SetupIconFile=.*$', "SetupIconFile=$icon")
+$chineseMessages = Join-Path $repo 'installer\ChineseSimplified.isl'
+$script = $script.Replace('MessagesFile: "ChineseSimplified.isl"', "MessagesFile: `"$chineseMessages`"")
 $marker = Join-Path $root 'installation.id'
 Set-Content -LiteralPath $marker -Value $identity
 $script = $script.Replace('Source: "installation.id"', "Source: `"$marker`"")
@@ -46,8 +50,8 @@ function Assert-Sentinels {
 try {
     New-Item -Path $runPath -Force | Out-Null
     New-ItemProperty -Path $runPath -Name $identity -Value '"C:\fake-portable\CodexProfileOverlay.exe"' -PropertyType String -Force | Out-Null
-    foreach ($version in @('1.0.0', $TargetVersion)) {
-        $selectedPayload = if ($version -eq '1.0.0' -and $PreviousPayload) { $PreviousPayload } else { $PublishedPayload }
+    foreach ($version in @($PreviousVersion, $TargetVersion)) {
+        $selectedPayload = if ($version -eq $PreviousVersion -and $PreviousPayload) { $PreviousPayload } else { $PublishedPayload }
         if ($selectedPayload) {
             Copy-Item -Path (Join-Path $selectedPayload '*') -Destination $payload -Recurse -Force
         } else {
@@ -56,7 +60,8 @@ try {
         & $InnoCompiler "/DProductVersion=$version" "/DPublishDir=$payload" "/DArtifactsDir=$root" $source | Out-File (Join-Path $root "compile-$version.txt")
         if ($LASTEXITCODE -ne 0) { throw 'Smoke installer compile failed' }
         $setup = Join-Path $root "$identity-win-x64-setup.exe"
-        Run-TestInstaller $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installed`"", "/LOG=`"$root\install-$version.log`"")
+        $language = if ($version -eq $PreviousVersion) { 'english' } else { $SetupLanguage }
+        Run-TestInstaller $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LANG=$language", "/DIR=`"$installed`"", "/LOG=`"$root\install-$version.log`"")
         $metadata = Get-ItemProperty -LiteralPath $uninstallPath
         if ($metadata.DisplayVersion -ne $version) { throw 'Installer version mismatch' }
         if ($metadata.InstallLocation.TrimEnd('\') -ne $installed.TrimEnd('\')) { throw 'InstallLocation missing or incorrect' }

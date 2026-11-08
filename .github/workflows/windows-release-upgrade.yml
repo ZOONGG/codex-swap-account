@@ -1,0 +1,59 @@
+name: Windows release upgrade
+
+on:
+  push:
+    branches:
+      - codex/v1.1.1-stability
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Initialize diagnostics
+        shell: pwsh
+        run: '"Candidate commit: $env:GITHUB_SHA" | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP "release-upgrade.txt")'
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Ensure Inno Setup compiler
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --version=6.7.3 --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+      - name: Build candidate installer
+        id: build
+        shell: pwsh
+        run: .\publish.ps1 -Configuration Release
+      - name: Test official release upgrade
+        id: acceptance
+        shell: pwsh
+        env:
+          RELEASE_UPGRADE_RUNNER: ${{ runner.environment }}
+        run: .\installer\Test-HostedReleaseUpgrade.ps1
+      - name: Record workflow step outcomes
+        if: always()
+        shell: pwsh
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          ACCEPTANCE_OUTCOME: ${{ steps.acceptance.outcome }}
+        run: |
+          "Build: $env:BUILD_OUTCOME", "Acceptance: $env:ACCEPTANCE_OUTCOME" |
+            Add-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'release-upgrade.txt')
+      - name: Upload sanitized acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-upgrade-report
+          path: ${{ runner.temp }}/release-upgrade.txt
+          if-no-files-found: error
+          retention-days: 14

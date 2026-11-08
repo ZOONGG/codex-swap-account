@@ -5,6 +5,24 @@ namespace CodexProfileOverlay.Tests;
 
 public sealed class SettingsServiceTests
 {
+    [Theory]
+    [InlineData(LanguagePreference.English)]
+    [InlineData(LanguagePreference.Russian)]
+    [InlineData(LanguagePreference.Chinese)]
+    [InlineData(LanguagePreference.SystemDefault)]
+    public void LanguageChangesRetainOtherSettings(LanguagePreference language)
+    {
+        using var temp = new TempDirectory();
+        var service = new SettingsService(Path.Combine(temp.Path, "settings.json"));
+        service.Save(new OverlaySettings { Language = LanguagePreference.Russian, OffsetX = 123.5, Theme = AppTheme.Light });
+        var settings = service.Load();
+        settings.Language = language;
+        service.Save(settings);
+        var loaded = service.Load();
+        Assert.Equal(language, loaded.Language);
+        Assert.Equal(123.5, loaded.OffsetX);
+        Assert.Equal(AppTheme.Light, loaded.Theme);
+    }
     [Fact]
     public void SaveAndLoad_RoundTripsSettings()
     {

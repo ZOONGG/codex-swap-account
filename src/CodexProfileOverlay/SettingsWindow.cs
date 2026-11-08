@@ -26,6 +26,7 @@ internal sealed class SettingsWindow : Window
     private double updateProgress;
     private TextBlock? updateProgressText;
     private readonly Func<bool> canInstallUpdate;
+    private readonly Func<string, Task<bool>> testUsageProvider;
     private readonly Action<bool> setInstallingUpdate;
     private bool installingUpdate;
     private readonly bool installed;
@@ -73,6 +74,7 @@ internal sealed class SettingsWindow : Window
         Action<OverlaySettings> save,
         Action statusChanged,
         Func<string, Task> refreshUsage,
+        Func<string, Task<bool>> testUsageProvider,
         Action addProfile,
         Action manageProfiles,
         Action openProfilesFolder,
@@ -101,6 +103,7 @@ internal sealed class SettingsWindow : Window
         this.save = save;
         this.statusChanged = statusChanged;
         this.refreshUsage = refreshUsage;
+        this.testUsageProvider = testUsageProvider;
         this.addProfile = addProfile;
         this.manageProfiles = manageProfiles;
         this.openProfilesFolder = openProfilesFolder;
@@ -373,10 +376,8 @@ internal sealed class SettingsWindow : Window
         if (supportButton is not null)
         {
             supportButton.Content = SupportIcons.Vector(SupportIcons.Heart, Brush("ErrorBrush"), 18);
-            System.Windows.Automation.AutomationProperties.SetName(supportButton, LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian ? "Поддержать" : "Support");
-            supportButton.ToolTip = LocalizationCatalog.Resolve(localizer.Language) == LanguagePreference.Russian
-                ? "Поддержать развитие Codex Swap Account"
-                : "Support Codex Swap Account development";
+            System.Windows.Automation.AutomationProperties.SetName(supportButton, localizer["Support"]);
+            supportButton.ToolTip = localizer["SupportDevelopment"];
         }
     }
 
@@ -732,7 +733,7 @@ internal sealed class SettingsWindow : Window
             testProvider.IsEnabled = false;
             try
             {
-                bool supported = await statusService.TestProviderSupportAsync(selected.DirectoryPath, CancellationToken.None);
+                bool supported = await testUsageProvider(selected.Name);
                 if (supported)
                 {
                     settings.ShowAutomaticLimitIndicators = true;
@@ -1115,7 +1116,7 @@ internal sealed class SettingsWindow : Window
             return;
         }
 
-        backupMaintenance.CleanAllCompleted();
+        if (!backupMaintenance.CleanAllCompleted()) return;
         statusText.Text = localizer["BackupCleanupCompleted"];
         Rebuild();
     }
@@ -1552,6 +1553,7 @@ internal sealed class SettingsWindow : Window
             LanguagePreference.SystemDefault => localizer["SystemDefault"],
             LanguagePreference.English => localizer["English"],
             LanguagePreference.Russian => localizer["Russian"],
+            LanguagePreference.Chinese => localizer["Chinese"],
             PositionPreset.AfterMenu => localizer["AfterMenu"],
             PositionPreset.TopCenter => localizer["TopCenter"],
             PositionPreset.TopRight => localizer["TopRight"],

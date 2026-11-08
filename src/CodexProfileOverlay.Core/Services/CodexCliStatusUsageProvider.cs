@@ -50,7 +50,7 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
         }
 
         string fullProfileDirectory = Path.GetFullPath(profileDirectory);
-        Directory.CreateDirectory(fullProfileDirectory);
+        if (!File.Exists(Path.Combine(fullProfileDirectory, "auth.json"))) return null;
         for (int attempt = 0; attempt < 2; attempt++)
         {
             CodexRateLimitsCapture? result = await CaptureOnceAsync(executable, fullProfileDirectory, cancellationToken).ConfigureAwait(false);
@@ -81,13 +81,15 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
         string fullProfileDirectory,
         CancellationToken cancellationToken, bool accountRead = false)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var process = new Process
         {
             StartInfo = CreateStartInfo(executable, fullProfileDirectory),
         };
 
         process.Start();
-        Task stderrTask = OfficialProfileLoginRuntime.DrainAsync(process.StandardError);
+        using var draining = new CancellationTokenSource();
+        Task stderrTask = OfficialProfileLoginRuntime.DrainAsync(process.StandardError, draining.Token);
         try
         {
             await WriteMessageAsync(
@@ -110,20 +112,27 @@ public sealed class CodexAppServerRateLimitsSource : ICodexRateLimitsSource
         }
         finally
         {
-            process.StandardInput.Close();
-            if (!process.HasExited)
+            try
             {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException) { }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Keep ownership until the writer exits even if Windows denies termination.
+                // The controller bounds the wait and leaves the profile untouched on timeout.
+            }
+            finally
+            {
+                draining.Cancel();
                 try
                 {
-                    process.Kill(entireProcessTree: true);
+                    process.StandardInput.BaseStream.Dispose();
+                    await stderrTask.ConfigureAwait(false);
                 }
-                catch (InvalidOperationException)
-                {
-                }
+                catch (OperationCanceledException) when (draining.IsCancellationRequested) { }
+                finally { await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); }
             }
-
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            await stderrTask.ConfigureAwait(false);
         }
     }
 

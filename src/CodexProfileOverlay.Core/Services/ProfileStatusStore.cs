@@ -71,6 +71,16 @@ public sealed class ProfileStatusStore
         }
     }
 
+    internal void Update(Action<ProfileStatusDocument> update)
+    {
+        lock (lockObject)
+        {
+            ProfileStatusDocument document = Load();
+            update(document);
+            Save(document);
+        }
+    }
+
     public ProfileStatusMetadata GetOrCreateStatus(ProfileStatusDocument document, string profileId)
     {
         ProfileStatusMetadata? status = document.Profiles.FirstOrDefault(p => p.ProfileId.Equals(profileId, StringComparison.OrdinalIgnoreCase));

@@ -1,33 +1,79 @@
 using System.Globalization;
+using CodexProfileOverlay.Core.Models;
 
 namespace CodexProfileOverlay.Core.Services;
 
 public static class UsageDisplayFormatter
 {
-    public static string Countdown(DateTimeOffset reset, DateTimeOffset now, bool russian)
+    public static string Countdown(DateTimeOffset reset, DateTimeOffset now, LanguagePreference language)
     {
         var left = reset - now;
-        if (left <= TimeSpan.Zero) return russian ? "Ожидается обновление" : "Awaiting refresh";
-        if (left.TotalMinutes < 1) return russian ? "Менее чем через минуту" : "In less than a minute";
-        if (left.TotalDays >= 1) return russian ? $"Через {(int)left.TotalDays} д {(int)left.Hours} ч" : $"In {(int)left.TotalDays}d {left.Hours}h";
-        return russian ? $"Через {(int)left.TotalHours} ч {left.Minutes} мин" : $"In {(int)left.TotalHours}h {left.Minutes}m";
+        switch (LocalizationCatalog.Resolve(language))
+        {
+            case LanguagePreference.Russian:
+                if (left <= TimeSpan.Zero) return "Ожидается обновление";
+                if (left.TotalMinutes < 1) return "Менее чем через минуту";
+                if (left.TotalDays >= 1) return $"Через {(int)left.TotalDays} д {(int)left.Hours} ч";
+                return $"Через {(int)left.TotalHours} ч {left.Minutes} мин";
+            case LanguagePreference.Chinese:
+                if (left <= TimeSpan.Zero) return "等待刷新";
+                if (left.TotalMinutes < 1) return "不到 1 分钟后";
+                if (left.TotalDays >= 1) return $"{(int)left.TotalDays} 天 {(int)left.Hours} 小时后";
+                return $"{(int)left.TotalHours} 小时 {left.Minutes} 分后";
+            default:
+                if (left <= TimeSpan.Zero) return "Awaiting refresh";
+                if (left.TotalMinutes < 1) return "In less than a minute";
+                if (left.TotalDays >= 1) return $"In {(int)left.TotalDays}d {left.Hours}h";
+                return $"In {(int)left.TotalHours}h {left.Minutes}m";
+        }
     }
 
-    public static string RefreshError(string error, bool russian) => error switch
+    public static string RefreshError(string error, LanguagePreference language) => LocalizationCatalog.Resolve(language) switch
     {
-        "Automatic limits unavailable" => russian ? "Автоматические лимиты недоступны" : "Automatic limits unavailable",
-        "Usage source returned no data" => russian ? "Источник не вернул данные" : "Usage source returned no data",
-        "Usage refresh timed out" => russian ? "Время ожидания обновления истекло" : "Usage refresh timed out",
-        _ => russian ? "Не удалось обновить лимиты" : "Usage refresh failed",
+        LanguagePreference.Russian => error switch
+        {
+            "Automatic limits unavailable" => "Автоматические лимиты недоступны",
+            "Usage source returned no data" => "Источник не вернул данные",
+            "Usage refresh timed out" => "Время ожидания обновления истекло",
+            _ => "Не удалось обновить лимиты",
+        },
+        LanguagePreference.Chinese => error switch
+        {
+            "Automatic limits unavailable" => "自动额度不可用",
+            "Usage source returned no data" => "额度来源未返回数据",
+            "Usage refresh timed out" => "额度刷新超时",
+            _ => "额度刷新失败",
+        },
+        _ => error switch
+        {
+            "Automatic limits unavailable" => "Automatic limits unavailable",
+            "Usage source returned no data" => "Usage source returned no data",
+            "Usage refresh timed out" => "Usage refresh timed out",
+            _ => "Usage refresh failed",
+        },
     };
 
-    public static string UpdatedAgo(DateTimeOffset capturedAt, DateTimeOffset now, bool russian)
+    public static string UpdatedAgo(DateTimeOffset capturedAt, DateTimeOffset now, LanguagePreference language)
     {
         var age = now - capturedAt;
-        if (age.TotalMinutes < 1) return russian ? "Только что" : "Just now";
-        if (age.TotalHours < 1) return russian ? $"{(int)age.TotalMinutes} мин назад" : $"{(int)age.TotalMinutes}m ago";
-        if (age.TotalDays < 1) return russian ? $"{(int)age.TotalHours} ч назад" : $"{(int)age.TotalHours}h ago";
-        return russian ? $"{(int)age.TotalDays} д назад" : $"{(int)age.TotalDays}d ago";
+        switch (LocalizationCatalog.Resolve(language))
+        {
+            case LanguagePreference.Russian:
+                if (age.TotalMinutes < 1) return "Только что";
+                if (age.TotalHours < 1) return $"{(int)age.TotalMinutes} мин назад";
+                if (age.TotalDays < 1) return $"{(int)age.TotalHours} ч назад";
+                return $"{(int)age.TotalDays} д назад";
+            case LanguagePreference.Chinese:
+                if (age.TotalMinutes < 1) return "刚刚";
+                if (age.TotalHours < 1) return $"{(int)age.TotalMinutes} 分钟前";
+                if (age.TotalDays < 1) return $"{(int)age.TotalHours} 小时前";
+                return $"{(int)age.TotalDays} 天前";
+            default:
+                if (age.TotalMinutes < 1) return "Just now";
+                if (age.TotalHours < 1) return $"{(int)age.TotalMinutes}m ago";
+                if (age.TotalDays < 1) return $"{(int)age.TotalHours}h ago";
+                return $"{(int)age.TotalDays}d ago";
+        }
     }
 
     public static int? TrayPercent(Models.UsageSnapshot? snapshot, Models.TrayUsageMode mode, DateTimeOffset now, TimeSpan threshold)

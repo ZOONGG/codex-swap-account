@@ -139,6 +139,31 @@ public sealed class ProfileStatusServiceTests
     }
 
     [Fact]
+    public async Task Refresh_MergesOnlyItsProfileIntoCurrentCache()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using TestService fixture = new(new DelegateProvider(async (_, token) =>
+        {
+            entered.SetResult();
+            await finish.Task.WaitAsync(token);
+            return Snapshot(("5h", 72, null));
+        }));
+        fixture.Service.Save(Document(("removed", Snapshot(("5h", 20, null)))));
+        Task refresh = fixture.Service.RefreshUsageAsync("work", "unused", fixture.Service.Load(), CancellationToken.None);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        fixture.Service.ClearCachedUsage("removed");
+        fixture.Service.SetAutomaticRefreshEnabled("work", false);
+        finish.SetResult();
+        await refresh.WaitAsync(TimeSpan.FromSeconds(5));
+
+        ProfileStatusDocument saved = fixture.Service.Load();
+        Assert.False(saved.Snapshots.ContainsKey("removed"));
+        Assert.False(saved.Profiles.Single(p => p.ProfileId == "work").AutomaticRefreshEnabled);
+        Assert.Equal(72, UsageIntelligence.EffectiveRemainingPercent(saved.Snapshots["work"]));
+    }
+
+    [Fact]
     public async Task FailedRefresh_PreservesPreviousSnapshotAndMarksItStale()
     {
         using TestService fixture = new(new DelegateProvider((_, _) => throw new InvalidOperationException("fake failure")));
