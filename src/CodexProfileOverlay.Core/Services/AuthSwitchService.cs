@@ -25,6 +25,18 @@ public sealed class AuthSwitchService
         this.backups = backups ?? new BackupMaintenanceService(paths);
     }
 
+    public bool HasPendingSwitch
+    {
+        get
+        {
+            try { return backups.FindPendingAuthSwitch() is not null; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                return true;
+            }
+        }
+    }
+
     public void RecoverPendingSwitch()
     {
         if (!switchGate.Wait(0))

@@ -9,7 +9,6 @@ public sealed class ProfileStatusService : IDisposable
     private readonly IUsageProvider usageProvider;
     private readonly SafeLogger logger;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> refreshing = new(StringComparer.OrdinalIgnoreCase);
-    private readonly SemaphoreSlim refreshGate = new(1, 1);
     private TimeSpan staleThreshold = TimeSpan.FromMinutes(90);
     private bool disposed;
 
@@ -39,20 +38,19 @@ public sealed class ProfileStatusService : IDisposable
 
     public void ClearCachedUsage(string profileId)
     {
-        ProfileStatusDocument document = Load();
-        _ = document.Snapshots.Remove(profileId);
-        ProfileStatusMetadata status = GetOrCreateStatus(document, profileId);
-        status.LastAutomaticSnapshot = null;
-        status.LastRefreshAttemptAt = null;
-        status.LastRefreshError = null;
-        Save(document);
+        store.Update(document =>
+        {
+            _ = document.Snapshots.Remove(profileId);
+            ProfileStatusMetadata status = GetOrCreateStatus(document, profileId);
+            status.LastAutomaticSnapshot = null;
+            status.LastRefreshAttemptAt = null;
+            status.LastRefreshError = null;
+        });
     }
 
     public void SetAutomaticRefreshEnabled(string profileId, bool enabled)
     {
-        ProfileStatusDocument document = Load();
-        GetOrCreateStatus(document, profileId).AutomaticRefreshEnabled = enabled;
-        Save(document);
+        store.Update(document => GetOrCreateStatus(document, profileId).AutomaticRefreshEnabled = enabled);
     }
 
     public string GetLimitIndicator(UsageSnapshot? snapshot, int greenThreshold, int yellowThreshold)
@@ -77,22 +75,13 @@ public sealed class ProfileStatusService : IDisposable
         if (!refreshing.TryAdd(profileId, 0)) return;
         try
         {
-            await refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            refreshing.TryRemove(profileId, out _);
-            throw;
-        }
-        try
-        {
             ProfileStatusMetadata status = GetOrCreateStatus(document, profileId);
             status.LastRefreshAttemptAt = DateTimeOffset.UtcNow;
 
             if (usageProvider.Capability != UsageProviderCapability.Supported)
             {
                 MarkFailure(document, profileId, status, "Automatic limits unavailable");
-                Save(document);
+                SaveRefresh(document, profileId, status);
                 return;
             }
 
@@ -101,6 +90,7 @@ public sealed class ProfileStatusService : IDisposable
             try
             {
                 UsageSnapshot? snapshot = await usageProvider.GetUsageAsync(profileDirectory, timeoutSource.Token).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (snapshot is null)
                 {
                     MarkFailure(document, profileId, status, "Usage source returned no data");
@@ -129,11 +119,11 @@ public sealed class ProfileStatusService : IDisposable
                 logger.Error($"Usage refresh failed for profile '{profileId}'.", exception);
             }
 
-            Save(document);
+            cancellationToken.ThrowIfCancellationRequested();
+            SaveRefresh(document, profileId, status);
         }
         finally
         {
-            refreshGate.Release();
             refreshing.TryRemove(profileId, out _);
         }
     }
@@ -211,7 +201,31 @@ public sealed class ProfileStatusService : IDisposable
         }
 
         disposed = true;
-        refreshGate.Dispose();
+    }
+
+    private void SaveRefresh(ProfileStatusDocument document, string profileId, ProfileStatusMetadata status)
+    {
+        store.Update(latest =>
+        {
+            ProfileStatusMetadata? current = latest.Profiles.FirstOrDefault(profile =>
+                profile.ProfileId.Equals(profileId, StringComparison.OrdinalIgnoreCase));
+            if (current is null)
+            {
+                current = GetOrCreateStatus(latest, profileId);
+                current.AutomaticRefreshEnabled = status.AutomaticRefreshEnabled;
+            }
+            current.LastRefreshAttemptAt = status.LastRefreshAttemptAt;
+            current.LastRefreshError = status.LastRefreshError;
+            if (status.LastRefreshError is null)
+            {
+                current.LastAutomaticSnapshot = status.LastAutomaticSnapshot;
+                latest.Snapshots[profileId] = document.Snapshots[profileId];
+            }
+            else if (latest.Snapshots.TryGetValue(profileId, out UsageSnapshot? previous))
+            {
+                previous.IsStale = true;
+            }
+        });
     }
 
     private static void MarkFailure(

@@ -6,6 +6,33 @@ namespace CodexProfileOverlay.Tests;
 
 public sealed class AuthSwitchRecoveryTests
 {
+    [Fact]
+    public async Task CompletedBackup_SurvivesCleanupUntilRelaunchFailureIsRolledBack()
+    {
+        using var temp = CreateLayout();
+        var backups = new BackupMaintenanceService(temp.Paths,
+            policy: new BackupRetentionPolicy(10_000, 20_000, 0, 100_000));
+        var service = new AuthSwitchService(temp.Paths, new ProfileDiscoveryService(temp.Paths.ProfilesDirectory),
+            temp.ActiveProfileStore, backups: backups);
+        using (backups.ProtectSwitchBackups())
+        {
+            AuthSwitchResult result = await service.SwitchAsync("target");
+            await Task.Run(() =>
+            {
+                backups.CleanupRetention();
+                Assert.False(backups.CleanAllCompleted());
+            });
+            Assert.True(File.Exists(Path.Combine(result.BackupPath!, "previous-auth.json")));
+
+            service.Rollback(result);
+            Assert.Equal("previous", temp.ActiveProfileStore.Read());
+            Assert.Equal("live-before", temp.ReadSharedAuth());
+        }
+
+        Assert.True(backups.CleanAllCompleted());
+        Assert.Empty(Directory.GetDirectories(temp.Paths.BackupDirectory, "completed-*"));
+    }
+
     [Theory]
     [InlineData(0)] // Journal published, no credentials changed.
     [InlineData(1)] // Previous profile saved.

@@ -44,6 +44,7 @@ internal sealed class OverlayController : IDisposable
     private HotkeyManager? hotkeyManager;
     private IReadOnlyList<ProfileInfo> profiles = [];
     private CodexWindowInfo? attachedWindow;
+    private readonly ProfileUsageOperations usageOperations = new();
     private bool switching;
     private bool automaticUsageRefreshRunning;
 
@@ -365,6 +366,7 @@ internal sealed class OverlayController : IDisposable
         switching = true;
         AuthSwitchResult? switchResult = null;
         bool relaunchAttempted = false;
+        IDisposable? backupLease = null;
         overlayWindow!.SetSwitching(true);
         try
         {
@@ -373,6 +375,8 @@ internal sealed class OverlayController : IDisposable
                 return;
             }
 
+            if (switchService.HasPendingSwitch) await usageOperations.DrainAsync(disposalTokenSource.Token);
+            else await usageOperations.DrainAsync(disposalTokenSource.Token, profileName, activeProfileStore.Read());
             overlayWindow.Hide();
             overlayWindow.AllowAutoShow = false;
             trayIcon?.UpdateOverlayState(false);
@@ -393,6 +397,7 @@ internal sealed class OverlayController : IDisposable
             using var completedShutdown = shutdownSession;
             MigrateLegacyProfileStateSafely();
             CodexShutdownCoordinator.VerifyStopped(completedShutdown!, disposalTokenSource.Token);
+            backupLease = backupMaintenance.ProtectSwitchBackups();
             switchResult = await switchService.SwitchAsync(profileName, disposalTokenSource.Token).ConfigureAwait(true);
             RefreshProfiles();
             if (settings.LaunchCodexAfterSwitching)
@@ -435,7 +440,9 @@ internal sealed class OverlayController : IDisposable
         }
         finally
         {
+            backupLease?.Dispose();
             switching = false;
+            if (backupLease is not null) backupMaintenance.TryCleanupRetention();
             overlayWindow?.SetSwitching(false);
             if (overlayWindow is not null)
             {
@@ -503,7 +510,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task RunDesktopOperationAsync(string? name, bool capture)
     {
-        if (installingUpdate || switching || accountOperation || automaticUsageRefreshRunning)
+        if (installingUpdate || switching || accountOperation)
         {
             overlayWindow?.ShowNotification(localizer["AccountBusy"]);
             return;
@@ -542,6 +549,8 @@ internal sealed class OverlayController : IDisposable
 
             if (!string.Equals(live, WindowsDesktopStorage.Resolve(paths, desktopSessions, capturedProfile, capture), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The live Desktop data directory changed during confirmation.");
+            if (recovery) await usageOperations.DrainAsync(token);
+            else await usageOperations.DrainAsync(token, name, capture ? null : activeProfileStore.Read());
             failure = "DesktopCloseFailed";
             progress = new LoginProgressWindow(localizer, cancellation, title, "DesktopWorking") { ShowInTaskbar = true };
             DialogPlacement.CenterOnOwnerScreen(progress, owner, CurrentCodexWindowHandle());
@@ -646,7 +655,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task LoginAccountAsync(string name, bool reauthorize)
     {
-        if (installingUpdate || switching || accountOperation || automaticUsageRefreshRunning)
+        if (installingUpdate || switching || accountOperation)
         {
             overlayWindow?.ShowNotification(localizer["AccountBusy"]);
             return;
@@ -672,6 +681,7 @@ internal sealed class OverlayController : IDisposable
         bool added = false;
         try
         {
+            await usageOperations.DrainAsync(loginCancellation.Token, name);
             var runtime = new OfficialProfileLoginRuntime();
             runtime.EnsureAvailable();
             Window? owner = PromptOwner();
@@ -767,7 +777,7 @@ internal sealed class OverlayController : IDisposable
 
     private async Task CheckAccountAsync(ProfileInfo profile)
     {
-        if (installingUpdate || switching || accountOperation || automaticUsageRefreshRunning)
+        if (installingUpdate || switching || accountOperation)
         {
             overlayWindow?.ShowNotification(localizer["AccountBusy"]);
             return;
@@ -775,6 +785,7 @@ internal sealed class OverlayController : IDisposable
         accountOperation = true;
         try
         {
+            await usageOperations.DrainAsync(disposalTokenSource.Token, profile.Name);
             accountStates[profile.Name] = await new AccountStatusChecker(paths).CheckAsync(profile.DirectoryPath, disposalTokenSource.Token);
             profileManagerWindow?.UpdateProfiles(profiles, activeProfileStore.Read());
         }
@@ -804,6 +815,7 @@ internal sealed class OverlayController : IDisposable
             SaveSettings,
             RefreshStatusIndicators,
             RefreshUsageForProfileAsync,
+            TestUsageProviderAsync,
             () => _ = AddProfileAsync(),
             ShowProfileManager,
             () => OpenFolder(paths.ProfilesDirectory),
@@ -835,7 +847,7 @@ internal sealed class OverlayController : IDisposable
             localizer,
             () => _ = AddProfileAsync(),
             RenameDisplayName,
-            RemoveProfile,
+            profile => _ = RemoveProfileAsync(profile),
             ReorderProfiles,
             profile => OpenFolder(profile.DirectoryPath),
             RefreshProfiles,
@@ -880,7 +892,7 @@ internal sealed class OverlayController : IDisposable
         overlayWindow?.ShowNotification(localizer["ProfileRenamed"]);
     }
 
-    private void RemoveProfile(ProfileInfo profile)
+    private async Task RemoveProfileAsync(ProfileInfo profile)
     {
         if (installingUpdate || accountOperation || switching) return;
         accountOperation = true;
@@ -906,7 +918,10 @@ internal sealed class OverlayController : IDisposable
                 ShowRemovalError(localizer["DesktopRecoveryRequired"]);
                 return;
             }
+            await usageOperations.DrainAsync(disposalTokenSource.Token, profile.Name);
             profileManager.RemoveProfile(profile.Name, activeProfileStore.Read());
+            try { statusService.ClearCachedUsage(profile.Name); }
+            catch (Exception exception) { logger.Error("Could not clear cached usage after removal.", exception); }
             if (!TryRefreshProfiles())
             {
                 ShowRemovalError(localizer["CouldNotRefreshProfiles"]);
@@ -914,6 +929,7 @@ internal sealed class OverlayController : IDisposable
             }
             overlayWindow?.ShowNotification(localizer["ProfileRemoved"]);
         }
+        catch (OperationCanceledException) when (disposalTokenSource.IsCancellationRequested) { }
         catch (Exception exception)
         {
             // No paths or parsed metadata in removal diagnostics.
@@ -1076,9 +1092,29 @@ internal sealed class OverlayController : IDisposable
         trayIcon?.UpdateUsage(statusDocument.Snapshots.GetValueOrDefault(activeProfileStore.Read() ?? string.Empty), settings);
     }
 
+    private Task<bool> RunUsageRefreshAsync(ProfileInfo profile) =>
+        usageOperations.RunAsync(profile.Name, token =>
+            statusService.RefreshUsageAsync(profile.Name, profile.DirectoryPath, statusService.Load(), token),
+            disposalTokenSource.Token);
+
+    private async Task<bool> TestUsageProviderAsync(string profileName)
+    {
+        if (installingUpdate || switching || accountOperation || desktopSessions.HasPendingOperation || switchService.HasPendingSwitch) return false;
+        ProfileInfo? profile = profiles.FirstOrDefault(current =>
+            string.Equals(current.Name, profileName, StringComparison.OrdinalIgnoreCase));
+        if (profile is null) return false;
+        bool supported = false;
+        bool completed = await usageOperations.RunAsync(profile.Name, async token =>
+        {
+            supported = await statusService.TestProviderSupportAsync(profile.DirectoryPath, token);
+        }, disposalTokenSource.Token);
+        return completed && supported;
+    }
+
     private async Task RefreshUsageForProfileAsync(string profileName)
     {
-        if (installingUpdate || switching || accountOperation || statusService.ProviderCapability != UsageProviderCapability.Supported)
+        if (installingUpdate || switching || accountOperation || desktopSessions.HasPendingOperation
+            || switchService.HasPendingSwitch || statusService.ProviderCapability != UsageProviderCapability.Supported)
         {
             return;
         }
@@ -1089,8 +1125,7 @@ internal sealed class OverlayController : IDisposable
             return;
         }
 
-        ProfileStatusDocument document = statusService.Load();
-        await statusService.RefreshUsageAsync(profile.Name, profile.DirectoryPath, document, disposalTokenSource.Token).ConfigureAwait(true);
+        if (!await RunUsageRefreshAsync(profile)) return;
         lastUsageRefreshAttempts[profile.Name] = DateTimeOffset.UtcNow;
         RefreshStatusIndicators();
     }
@@ -1132,7 +1167,7 @@ internal sealed class OverlayController : IDisposable
             })
             .ToArray();
 
-        if (dueProfiles.Length == 0)
+        if (dueProfiles.Length == 0 || switchService.HasPendingSwitch)
         {
             return;
         }
@@ -1149,13 +1184,14 @@ internal sealed class OverlayController : IDisposable
             {
                 if (disposalTokenSource.IsCancellationRequested
                     || installingUpdate || switching || accountOperation || desktopSessions.HasPendingOperation
+                    || switchService.HasPendingSwitch
                     || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
                 {
                     return;
                 }
 
-                ProfileStatusDocument document = statusService.Load();
-                await statusService.RefreshUsageAsync(profile.Name, profile.DirectoryPath, document, disposalTokenSource.Token).ConfigureAwait(true);
+                if (!profiles.Any(current => string.Equals(current.Name, profile.Name, StringComparison.OrdinalIgnoreCase))) continue;
+                if (!await RunUsageRefreshAsync(profile)) return;
                 lastUsageRefreshAttempts[profile.Name] = DateTimeOffset.UtcNow;
                 RefreshStatusIndicators();
             }

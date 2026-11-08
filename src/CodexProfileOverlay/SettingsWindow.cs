@@ -26,6 +26,7 @@ internal sealed class SettingsWindow : Window
     private double updateProgress;
     private TextBlock? updateProgressText;
     private readonly Func<bool> canInstallUpdate;
+    private readonly Func<string, Task<bool>> testUsageProvider;
     private readonly Action<bool> setInstallingUpdate;
     private bool installingUpdate;
     private readonly bool installed;
@@ -73,6 +74,7 @@ internal sealed class SettingsWindow : Window
         Action<OverlaySettings> save,
         Action statusChanged,
         Func<string, Task> refreshUsage,
+        Func<string, Task<bool>> testUsageProvider,
         Action addProfile,
         Action manageProfiles,
         Action openProfilesFolder,
@@ -101,6 +103,7 @@ internal sealed class SettingsWindow : Window
         this.save = save;
         this.statusChanged = statusChanged;
         this.refreshUsage = refreshUsage;
+        this.testUsageProvider = testUsageProvider;
         this.addProfile = addProfile;
         this.manageProfiles = manageProfiles;
         this.openProfilesFolder = openProfilesFolder;
@@ -730,7 +733,7 @@ internal sealed class SettingsWindow : Window
             testProvider.IsEnabled = false;
             try
             {
-                bool supported = await statusService.TestProviderSupportAsync(selected.DirectoryPath, CancellationToken.None);
+                bool supported = await testUsageProvider(selected.Name);
                 if (supported)
                 {
                     settings.ShowAutomaticLimitIndicators = true;
@@ -1113,7 +1116,7 @@ internal sealed class SettingsWindow : Window
             return;
         }
 
-        backupMaintenance.CleanAllCompleted();
+        if (!backupMaintenance.CleanAllCompleted()) return;
         statusText.Text = localizer["BackupCleanupCompleted"];
         Rebuild();
     }

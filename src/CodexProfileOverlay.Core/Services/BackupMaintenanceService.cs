@@ -24,6 +24,21 @@ public sealed class BackupMaintenanceService
     private readonly Func<DateTimeOffset> utcNow;
     private readonly BackupRetentionPolicy policy;
 
+    private readonly SemaphoreSlim completedBackups = new(1, 1);
+
+    public IDisposable ProtectSwitchBackups()
+    {
+        if (!completedBackups.Wait(0))
+            throw new InvalidOperationException("Completed backup maintenance is in progress.");
+        return new SwitchBackupLease(completedBackups);
+    }
+
+    private sealed class SwitchBackupLease(SemaphoreSlim gate) : IDisposable
+    {
+        private SemaphoreSlim? held = gate;
+        public void Dispose() => Interlocked.Exchange(ref held, null)?.Release();
+    }
+
     public BackupMaintenanceService(
         AppPaths paths,
         SafeLogger? logger = null,
@@ -247,6 +262,13 @@ public sealed class BackupMaintenanceService
 
     public void CleanupRetention()
     {
+        if (!completedBackups.Wait(0)) return;
+        try { CleanupRetentionCore(); }
+        finally { completedBackups.Release(); }
+    }
+
+    private void CleanupRetentionCore()
+    {
         DesktopSnapshot.RejectLinks(paths.BackupDirectory);
         if (!Directory.Exists(paths.BackupDirectory))
         {
@@ -327,12 +349,18 @@ public sealed class BackupMaintenanceService
         return InspectLegacyBackups();
     }
 
-    public void CleanAllCompleted()
+    public bool CleanAllCompleted()
     {
-        foreach (BackupEntry entry in EnumerateCompleted())
+        if (!completedBackups.Wait(0)) return false;
+        try
         {
-            DeleteEntry(entry);
+            foreach (BackupEntry entry in EnumerateCompleted())
+            {
+                DeleteEntry(entry);
+            }
+            return true;
         }
+        finally { completedBackups.Release(); }
     }
 
     private FileSafety ValidateAuthenticationFile(string file, string sanitizedName)
