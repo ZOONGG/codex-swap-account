@@ -10,8 +10,10 @@ public sealed class SafeLoggerTests
         using var temp = new TempDirectory();
         var logger = new SafeLogger(temp.Path);
 
-        string message = "Authorization" + ": Bearer " + "sk-secret-value " + "refresh" + "_token=very-secret " + "user" + "@example.com";
-        logger.Error(message, new InvalidOperationException("session 00000000-0000-0000-0000-000000000000"));
+        string message = "Authorization" + ": Bearer " + "sk-secret-value " + "refresh" + "_token=very-secret " + "user" + "@example.com session 00000000-0000-0000-0000-000000000000";
+        logger.Error(message, new AggregateException(
+            new InvalidOperationException(@"C:\private\session\auth.json"),
+            new System.ComponentModel.Win32Exception(5, "https://private.invalid/example")));
 
         string log = File.ReadAllText(Directory.EnumerateFiles(temp.Path).Single());
         Assert.DoesNotContain("sk-secret-value", log, StringComparison.Ordinal);
@@ -20,5 +22,9 @@ public sealed class SafeLoggerTests
         Assert.DoesNotContain("00000000-0000-0000-0000-000000000000", log, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[redacted]", log, StringComparison.Ordinal);
         Assert.Contains("[redacted-id]", log, StringComparison.Ordinal);
+        Assert.Contains("InvalidOperationException", log, StringComparison.Ordinal);
+        Assert.Contains("NativeErrorCode=5", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("auth.json", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("private.invalid", log, StringComparison.Ordinal);
     }
 }

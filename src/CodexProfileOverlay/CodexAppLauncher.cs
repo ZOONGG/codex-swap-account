@@ -6,7 +6,7 @@ using CodexProfileOverlay.Core.Services;
 
 namespace CodexProfileOverlay;
 
-internal sealed record PreparedCodexLaunch(string AppId);
+internal sealed record PreparedCodexLaunch(string AppId, IReadOnlyList<string> Executables);
 
 [SupportedOSPlatform("windows")]
 internal sealed class CodexAppLauncher
@@ -54,7 +54,7 @@ internal sealed class CodexAppLauncher
         using var json = JsonDocument.Parse(output);
         var registrations = json.RootElement.ValueKind == JsonValueKind.Array
             ? json.RootElement.EnumerateArray().ToArray() : [json.RootElement];
-        var ids = new List<string>();
+        var entries = new List<(string Id, string Executable)>();
         foreach (var registration in registrations)
         {
             string? family = registration.GetProperty("Family").GetString();
@@ -63,14 +63,14 @@ internal sealed class CodexAppLauncher
             string? id = CodexLaunchIdentity.Validate(registration.GetProperty("AppId").GetString());
             if (root is null || executable is null || id is null || Path.IsPathRooted(executable)) continue;
             string path = Path.Combine(root, executable);
-            if (OfficialCodexDesktopIdentity.IsOfficial(family, root, path) && File.Exists(path)) ids.Add(id);
+            if (OfficialCodexDesktopIdentity.IsOfficial(family, root, path) && File.Exists(path)) entries.Add((id, path));
         }
-        string appId = CodexLaunchIdentity.Select(ids)
+        string appId = CodexLaunchIdentity.Select(entries.Select(entry => entry.Id))
             ?? throw new InvalidOperationException("No usable official Codex launch entry was found. Codex has not been closed.");
         token.ThrowIfCancellationRequested();
         var manager = CreateManager(); // Preflight activation service before shutdown.
         _ = Marshal.ReleaseComObject(manager);
-        return new PreparedCodexLaunch(appId);
+        return new PreparedCodexLaunch(appId, entries.Select(entry => entry.Executable).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
     public void Launch(PreparedCodexLaunch target)

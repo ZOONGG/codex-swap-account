@@ -14,6 +14,7 @@ internal sealed class OverlayController : IDisposable
     private readonly ActiveProfileStore activeProfileStore;
     private readonly SettingsService settingsService;
     private readonly AuthSwitchService switchService;
+    private readonly DesktopSessionService desktopSessions;
     private readonly CodexProcessService processService;
     private readonly IStartupRegistrationService startupRegistrationService;
     private readonly SafeLogger logger;
@@ -62,6 +63,7 @@ internal sealed class OverlayController : IDisposable
         this.activeProfileStore = activeProfileStore;
         this.settingsService = settingsService;
         this.switchService = switchService;
+        desktopSessions = new DesktopSessionService(paths);
         this.processService = processService;
         this.startupRegistrationService = startupRegistrationService;
         this.logger = logger;
@@ -94,7 +96,8 @@ internal sealed class OverlayController : IDisposable
         RefreshProfiles();
         ApplySettings();
         timer.Start();
-        if (!afterInstallation && settings.LaunchCodexWhenOverlayStarts)
+        if (desktopSessions.HasPendingOperation) ShowDesktopError("DesktopRecoveryRequired");
+        else if (!afterInstallation && settings.LaunchCodexWhenOverlayStarts)
         {
             _ = LaunchCodexAndWaitAsync(disposalTokenSource.Token);
         }
@@ -175,7 +178,7 @@ internal sealed class OverlayController : IDisposable
             Localizer = localizer,
         };
 
-        hotkeyManager = new HotkeyManager(overlayWindow.Handle);
+        hotkeyManager = new HotkeyManager(overlayWindow.Handle, logger);
         hotkeyManager.ToggleOverlayRequested += ToggleOverlay;
         hotkeyManager.ProfileHotkeyRequested += index =>
         {
@@ -195,7 +198,7 @@ internal sealed class OverlayController : IDisposable
 
         trayIcon = new TrayIconService(localizer);
         trayIcon.ToggleOverlayRequested += ToggleOverlay;
-        trayIcon.OpenCodexRequested += () => _ = LaunchCodexAndWaitAsync(disposalTokenSource.Token);
+        trayIcon.OpenCodexRequested += () => _ = OpenCodexOrRecoverAsync();
         trayIcon.SettingsRequested += ShowSettingsWindow;
         trayIcon.ProfileSelected += profile => _ = SwitchProfileAsync(profile);
         trayIcon.StartWithWindowsChanged += enabled =>
@@ -299,6 +302,7 @@ internal sealed class OverlayController : IDisposable
     {
         try
         {
+            if (desktopSessions.HasPendingOperation) return false;
             profileManager.EnsureMetadata();
             profiles = profileManager.ListProfiles();
             string? activeProfile = activeProfileStore.Read();
@@ -344,8 +348,16 @@ internal sealed class OverlayController : IDisposable
 
     private async Task SwitchProfileAsync(string profileName)
     {
-        if (installingUpdate || switching || accountOperation || string.Equals(profileName, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
+        if (installingUpdate || switching || accountOperation) return;
+        if (desktopSessions.HasPendingOperation)
         {
+            await RunDesktopOperationAsync(null, capture: false);
+            return;
+        }
+        if (string.Equals(profileName, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase)) return;
+        if (desktopSessions.RequiresDesktopSwitch(profileName))
+        {
+            await RunDesktopOperationAsync(profileName, capture: false);
             return;
         }
 
@@ -355,7 +367,7 @@ internal sealed class OverlayController : IDisposable
         overlayWindow!.SetSwitching(true);
         try
         {
-            if (settings.ConfirmBeforeForceClose && !ConfirmProfileSwitch(profileName))
+            if ((settings.ConfirmBeforeForceClose || settings.ForceCloseFallback) && !ConfirmProfileSwitch(profileName))
             {
                 return;
             }
@@ -388,7 +400,7 @@ internal sealed class OverlayController : IDisposable
             }
 
             overlayWindow?.ShowNotification(localizer.Format("SwitchedToAccount", profileName));
-            logger.Info($"Switched to profile '{profileName}'.");
+            logger.Info("Switched an auth-only profile.");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -404,7 +416,7 @@ internal sealed class OverlayController : IDisposable
                     logger.Error("Authorization rollback failed.", rollbackException);
                 }
             }
-            logger.Error($"Switch to profile '{profileName}' failed.", exception);
+            logger.Error("Auth-only profile switch failed.", exception);
             overlayWindow?.ShowError(localizer["CouldNotSwitch"] + " " + localizer["PreviousAuthorizationRestored"] + ".");
             trayIcon?.ShowBalloon("Codex Profile Overlay", localizer["CouldNotSwitch"] + " " + localizer["PreviousAuthorizationRestored"] + ".");
         }
@@ -442,12 +454,18 @@ internal sealed class OverlayController : IDisposable
     {
         if (installingUpdate || switching || accountOperation) return;
         EnsureOverlay();
+        if (desktopSessions.HasPendingOperation)
+        {
+            await RunDesktopOperationAsync(null, capture: false);
+            return;
+        }
         string? name;
+        bool capture;
         accountOperation = true;
         try
         {
-            name = ShowPrompt(PromptOwner(), localizer["AddProfileTitle"], localizer["ProfileDirectoryName"],
-                primaryText: localizer["BrowserLogin"]);
+            Window? owner = PromptOwner();
+            (name, capture) = PromptDialog.ShowProfileChoice(owner, owner is null ? CurrentCodexWindowHandle() : IntPtr.Zero, localizer);
         }
         finally { accountOperation = false; }
         if (name is null) return;
@@ -458,7 +476,159 @@ internal sealed class OverlayController : IDisposable
             System.Windows.MessageBox.Show(PromptOwner(), localizer[error], localizer["AddProfileTitle"], MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        await LoginAccountAsync(name, false);
+        if (capture) await RunDesktopOperationAsync(name, capture: true);
+        else await LoginAccountAsync(name, false);
+    }
+
+    private Task OpenCodexOrRecoverAsync()
+    {
+        if (installingUpdate || switching || accountOperation) return Task.CompletedTask;
+        return desktopSessions.HasPendingOperation
+            ? RunDesktopOperationAsync(null, capture: false)
+            : LaunchCodexAndWaitAsync(disposalTokenSource.Token);
+    }
+
+    private async Task RunDesktopOperationAsync(string? name, bool capture)
+    {
+        if (installingUpdate || switching || accountOperation || automaticUsageRefreshRunning)
+        {
+            overlayWindow?.ShowNotification(localizer["AccountBusy"]);
+            return;
+        }
+        accountOperation = true;
+        bool recovery = name is null;
+        string title = recovery ? "DesktopRecover" : capture ? "DesktopCapture" : "DesktopSwitch";
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(disposalTokenSource.Token);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using var combined = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token, deadline.Token);
+        CancellationToken token = combined.Token;
+        PreparedCodexLaunch? launch = null;
+        string? live = null;
+        CodexDesktopProcessSession? shutdown = null;
+        IDisposable? lease = null;
+        LoginProgressWindow? progress = null;
+        bool closeRequested = false;
+        bool targetDesktop = false;
+        bool force = settings.ForceCloseFallback;
+        string failure = recovery ? "DesktopRecoveryRequired" : "DesktopPreflightFailed";
+        try
+        {
+            launch = await processService.PrepareLaunchAsync(token);
+            targetDesktop = name is not null && !capture && desktopSessions.IsDesktopProfile(name);
+            string? capturedProfile = targetDesktop ? name : activeProfileStore.Read();
+            live = WindowsDesktopStorage.Resolve(paths, desktopSessions, capturedProfile, capture);
+            if (capture) desktopSessions.PreflightCapture(name!, live);
+            else if (!recovery) desktopSessions.PreflightSwitch(name!, live);
+
+            string confirmKey = recovery ? "DesktopRecoverConfirm" : capture ? "DesktopCaptureConfirm"
+                : targetDesktop ? "DesktopSwitchConfirm" : "DesktopLeaveConfirm";
+            string message = localizer[confirmKey] + (force ? " " + localizer["DesktopForceConfirm"] : "");
+            Window? owner = PromptOwner();
+            if (!ConfirmDialog.Show(owner, owner is null ? CurrentCodexWindowHandle() : IntPtr.Zero,
+                localizer[title], message, localizer[title], localizer["Cancel"])) return;
+
+            if (!string.Equals(live, WindowsDesktopStorage.Resolve(paths, desktopSessions, capturedProfile, capture), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The live Desktop data directory changed during confirmation.");
+            failure = "DesktopCloseFailed";
+            progress = new LoginProgressWindow(localizer, cancellation, title, "DesktopWorking") { ShowInTaskbar = true };
+            DialogPlacement.CenterOnOwnerScreen(progress, owner, CurrentCodexWindowHandle());
+            progress.Show();
+            closeRequested = true;
+            shutdown = await processService.CloseCodexAsync(settings.GracefulCloseTimeoutSeconds, force, token);
+            if (capture && !shutdown.ObservedDesktop)
+                throw new InvalidOperationException("The verified Desktop session closed before capture.");
+            // Resolve the registered version again after confirmation and shutdown.
+            launch = await processService.PrepareLaunchAsync(token);
+            lease = WindowsDesktopStorage.PreventLaunch(launch, shutdown);
+            failure = "DesktopOperationFailed";
+            await Task.Run(() =>
+            {
+                if (recovery) desktopSessions.Recover(live, () => VerifyStopped(token));
+                else if (capture) desktopSessions.Capture(name!, live, () => VerifyStopped(token), token);
+                else desktopSessions.Switch(name!, live, () => VerifyStopped(token), token);
+            }, token);
+            token.ThrowIfCancellationRequested();
+            lease.Dispose();
+            lease = null;
+
+            if (capture || recovery || settings.LaunchCodexAfterSwitching)
+            {
+                failure = "DesktopLaunchFailed";
+                await LaunchCodexAndWaitAsync(token, throwOnFailure: true, launch);
+                var window = attachedWindow;
+                await Task.Delay(TimeSpan.FromMilliseconds(750), token);
+                if (window is null || windowFinder.RefreshKnownWindow(window) is null)
+                    throw new InvalidOperationException("Codex did not keep a verified window after relaunch.");
+            }
+            if (!recovery) desktopSessions.Complete(live);
+            if (capture)
+            {
+                accountStates[name!] = AccountAvailability.Available;
+                accountVerifiedAt[name!] = DateTimeOffset.UtcNow;
+                try { statusService.ClearCachedUsage(name!); }
+                catch (Exception exception) { logger.Error("Could not clear cached usage after Desktop capture.", exception); }
+            }
+            RefreshProfiles();
+            overlayWindow?.ShowNotification(localizer[recovery ? "DesktopRecovered" : capture ? "ProfileAdded"
+                : targetDesktop ? "DesktopSwitched" : "DesktopLeft"]);
+        }
+        catch (Exception exception)
+        {
+            logger.Error("Desktop session operation failed.", exception);
+            bool rolledBack = false;
+            if (!recovery && live is not null && desktopSessions.HasPendingOperation)
+            {
+                try
+                {
+                    if (lease is null)
+                    {
+                        // Activation may have started a process even when the window never appeared.
+                        shutdown?.Dispose();
+                        shutdown = await processService.CloseCodexAsync(settings.GracefulCloseTimeoutSeconds, force, CancellationToken.None);
+                        launch = await processService.PrepareLaunchAsync(CancellationToken.None);
+                        lease = WindowsDesktopStorage.PreventLaunch(launch, shutdown);
+                    }
+                    await Task.Run(() => desktopSessions.Recover(live, () => VerifyStopped(CancellationToken.None)));
+                    rolledBack = true;
+                }
+                catch (Exception rollback)
+                {
+                    logger.Error("Desktop session rollback requires recovery.", rollback);
+                    ShowDesktopError("DesktopRecoveryRequired");
+                    return;
+                }
+            }
+
+            lease?.Dispose();
+            lease = null;
+            if (!recovery && closeRequested && launch is not null && !disposalTokenSource.IsCancellationRequested)
+            {
+                try { await LaunchCodexAndWaitAsync(disposalTokenSource.Token, throwOnFailure: true, launch); }
+                catch (Exception relaunch) { logger.Error("Could not reopen Codex after Desktop rollback.", relaunch); }
+            }
+            if (desktopSessions.HasPendingOperation) ShowDesktopError("DesktopRecoveryRequired");
+            else if (deadline.IsCancellationRequested) ShowDesktopError("DesktopTimedOut");
+            else if (exception is DesktopAccountChangedException) ShowDesktopError("DesktopAccountChanged");
+            else if (exception is not OperationCanceledException)
+                ShowDesktopError(rolledBack ? "DesktopRolledBack" : failure);
+        }
+        finally
+        {
+            lease?.Dispose();
+            shutdown?.Dispose();
+            if (progress?.IsVisible == true) progress.Close();
+            accountOperation = false;
+            RefreshProfiles();
+        }
+
+        void VerifyStopped(CancellationToken cancellationToken) =>
+            CodexShutdownCoordinator.VerifyStopped(shutdown!, cancellationToken);
+    }
+
+    private void ShowDesktopError(string key)
+    {
+        overlayWindow?.ShowError(localizer[key]);
+        trayIcon?.ShowBalloon("Codex Profile Overlay", localizer[key]);
     }
 
     private async Task LoginAccountAsync(string name, bool reauthorize)
@@ -466,6 +636,16 @@ internal sealed class OverlayController : IDisposable
         if (installingUpdate || switching || accountOperation || automaticUsageRefreshRunning)
         {
             overlayWindow?.ShowNotification(localizer["AccountBusy"]);
+            return;
+        }
+        if (desktopSessions.HasPendingOperation)
+        {
+            ShowDesktopError("DesktopRecoveryRequired");
+            return;
+        }
+        if (reauthorize && desktopSessions.IsDesktopProfile(name))
+        {
+            ShowDesktopError("DesktopReauthorize");
             return;
         }
         accountOperation = true;
@@ -621,7 +801,7 @@ internal sealed class OverlayController : IDisposable
             ResetPosition,
             ResetSettings,
             () => Application.Current.Shutdown(),
-            () => !switching && !accountOperation,
+            () => !switching && !accountOperation && !desktopSessions.HasPendingOperation,
             value => installingUpdate = value);
         settingsWindow.Closed += (_, _) => settingsWindow = null;
         ShowCodexOwnedWindow(settingsWindow);
@@ -655,6 +835,7 @@ internal sealed class OverlayController : IDisposable
 
     private void RenameDisplayName(ProfileInfo profile)
     {
+        if (accountOperation || switching || desktopSessions.HasPendingOperation) return;
         string? name = ShowPrompt(PromptOwner(), localizer["RenameDisplayName"], localizer["DisplayName"], profile.DisplayName, localizer["Save"]);
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -668,7 +849,7 @@ internal sealed class OverlayController : IDisposable
 
     private void RenameDirectory(ProfileInfo profile)
     {
-        if (installingUpdate || accountOperation) return;
+        if (installingUpdate || accountOperation || switching || desktopSessions.HasPendingOperation) return;
         if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
         {
             overlayWindow?.ShowError(localizer["ActiveProfileCannotRemove"]);
@@ -692,6 +873,11 @@ internal sealed class OverlayController : IDisposable
         accountOperation = true;
         try
         {
+            if (desktopSessions.HasPendingOperation)
+            {
+                ShowDesktopError("DesktopRecoveryRequired");
+                return;
+            }
             if (string.Equals(profile.Name, activeProfileStore.Read(), StringComparison.OrdinalIgnoreCase))
             {
                 ShowRemovalError(localizer["ActiveProfileCannotRemove"]);
@@ -731,6 +917,7 @@ internal sealed class OverlayController : IDisposable
 
     private void ReorderProfiles(IReadOnlyList<string> orderedNames)
     {
+        if (accountOperation || switching || desktopSessions.HasPendingOperation) return;
         profileManager.Reorder(orderedNames);
         RefreshProfiles();
     }
@@ -893,7 +1080,7 @@ internal sealed class OverlayController : IDisposable
     private void BeginAutomaticUsageRefreshIfDue()
     {
         if (automaticUsageRefreshRunning
-            || installingUpdate || switching || accountOperation
+            || installingUpdate || switching || accountOperation || desktopSessions.HasPendingOperation
             || profiles.Count == 0
             || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
         {
@@ -943,7 +1130,7 @@ internal sealed class OverlayController : IDisposable
             foreach (ProfileInfo profile in dueProfiles)
             {
                 if (disposalTokenSource.IsCancellationRequested
-                    || installingUpdate || switching || accountOperation
+                    || installingUpdate || switching || accountOperation || desktopSessions.HasPendingOperation
                     || !UsageRefreshPolicy.AllowsAutomaticRefresh(settings, statusService.ProviderCapability))
                 {
                     return;
@@ -993,7 +1180,8 @@ internal sealed class OverlayController : IDisposable
             PromptOwner(),
             CurrentCodexWindowHandle(),
             localizer["ConfirmSwitchTitle"],
-            localizer.Format("ConfirmSwitchPrompt", profileName),
+            localizer.Format("ConfirmSwitchPrompt", profileName)
+                + (settings.ForceCloseFallback ? " " + localizer["DesktopForceConfirm"] : ""),
             localizer["ConfirmSwitchPrimary"],
             localizer["Cancel"],
             danger: true);

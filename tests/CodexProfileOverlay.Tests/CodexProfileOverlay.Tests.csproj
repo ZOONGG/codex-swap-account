@@ -21,6 +21,7 @@
   <ItemGroup>
     <!-- Compile the actual Windows adapters into tests without a WPF/runtime dependency. -->
     <Compile Include="..\..\src\CodexProfileOverlay\WindowsDesktopProcessCatalog.cs" Link="WindowsAdapters\WindowsDesktopProcessCatalog.cs" />
+    <Compile Include="..\..\src\CodexProfileOverlay\WindowsDesktopStorage.cs" Link="WindowsAdapters\WindowsDesktopStorage.cs" />
     <Compile Include="..\..\src\CodexProfileOverlay\WindowsTrayRegistration.cs" Link="WindowsAdapters\WindowsTrayRegistration.cs" />
     <Compile Include="..\..\src\CodexProfileOverlay\CodexAppLauncher.cs" Link="WindowsAdapters\CodexAppLauncher.cs" />
   </ItemGroup>

@@ -35,6 +35,10 @@ public sealed class AuthSwitchService
 
         try
         {
+            var desktop = new DesktopSessionService(paths);
+            desktop.RequireNoPendingOperation();
+            if (desktop.RequiresDesktopSwitch(targetProfileName))
+                throw new InvalidOperationException("A captured profile requires a Desktop session switch.");
             previousProfile = activeProfileStore.Read();
             var targetProfile = profileDiscovery.GetRequiredProfile(targetProfileName);
             if (string.Equals(previousProfile, targetProfile.Name, StringComparison.OrdinalIgnoreCase))
@@ -82,6 +86,7 @@ public sealed class AuthSwitchService
 
     public void Rollback(AuthSwitchResult result)
     {
+        new DesktopSessionService(paths).RequireNoPendingOperation();
         if (string.IsNullOrWhiteSpace(result.BackupPath))
         {
             throw new InvalidOperationException("The switch result does not contain a rollback backup.");

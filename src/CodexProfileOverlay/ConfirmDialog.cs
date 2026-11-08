@@ -14,7 +14,7 @@ internal sealed class ConfirmDialog : Window
         Title = title;
         Icon = AppIcons.WindowIcon;
         Width = 500;
-        Height = 246;
+        Height = message.Length > 150 ? 298 : 246;
         WindowStartupLocation = WindowStartupLocation.Manual;
         ResizeMode = ResizeMode.NoResize;
         WindowStyle = WindowStyle.None;

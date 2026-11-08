@@ -102,6 +102,10 @@ public sealed class ProfileLoginService
         bool retainRecovery = false;
         try
         {
+            var desktop = new DesktopSessionService(paths);
+            desktop.RequireNoPendingOperation();
+            if (reauthorize && desktop.IsDesktopProfile(name))
+                throw new InvalidOperationException("Capture the Desktop session again to change its authorization.");
             string destination = Path.Combine(paths.ProfilesDirectory, name);
             string auth = Path.Combine(destination, "auth.json");
             RejectLinks(destination);
@@ -111,6 +115,7 @@ public sealed class ProfileLoginService
             File.WriteAllText(Path.Combine(staging, "config.toml"), "cli_auth_credentials_store = \"file\"\n");
             if (!await runtime.LoginAsync(staging, cancellationToken).ConfigureAwait(false)) return false;
             cancellationToken.ThrowIfCancellationRequested();
+            desktop.RequireNoPendingOperation();
             RejectLinks(destination);
             string newAuth = Path.Combine(staging, "auth.json");
             if (!File.Exists(newAuth)) return false;
@@ -118,6 +123,7 @@ public sealed class ProfileLoginService
             bool active = reauthorize && string.Equals(activeStore.Read(), name, StringComparison.OrdinalIgnoreCase);
             if (active && (prepareActive is null || !await prepareActive(cancellationToken).ConfigureAwait(false))) return false;
             cancellationToken.ThrowIfCancellationRequested();
+            desktop.RequireNoPendingOperation();
             RejectLinks(destination);
             if (active != (reauthorize && string.Equals(activeStore.Read(), name, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException("Active profile changed during login.");

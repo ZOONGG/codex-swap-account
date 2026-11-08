@@ -13,4 +13,7 @@ public sealed class ProfileMetadata
     public string Accent { get; set; } = "#A970FF";
 
     public bool Hidden { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool DesktopSession { get; set; }
 }

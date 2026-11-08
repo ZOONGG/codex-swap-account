@@ -50,6 +50,7 @@ public sealed class ProfileManagerService
 
     public void EnsureMetadata()
     {
+        new DesktopSessionService(paths).RequireNoPendingOperation();
         IReadOnlyList<ProfileInfo> profiles = discovery.DiscoverProfiles();
         ProfileMetadataDocument document = metadataStore.Load();
         bool changed = false;
@@ -74,18 +75,20 @@ public sealed class ProfileManagerService
 
     public string CreateProfileDirectory(string profileName)
     {
+        new DesktopSessionService(paths).RequireNoPendingOperation();
         string validName = ProfileName.RequireValid(profileName);
         string directory = Path.GetFullPath(Path.Combine(paths.ProfilesDirectory, validName));
         EnsureInsideProfilesRoot(directory);
 
         if (Directory.Exists(directory))
         {
-            if (File.Exists(Path.Combine(directory, "auth.json")))
+            if (File.Exists(Path.Combine(directory, "auth.json")) || DesktopSnapshot.HasSnapshot(directory))
             {
                 throw new InvalidOperationException("A profile with that directory name already exists.");
             }
 
-            RemoveIncompleteProfileDirectory(validName);
+            if (!RemoveIncompleteProfileDirectory(validName))
+                throw new InvalidOperationException("A captured profile with this name needs recovery or removal.");
         }
 
         Directory.CreateDirectory(directory);
@@ -95,12 +98,13 @@ public sealed class ProfileManagerService
             File.WriteAllText(configFile, "cli_auth_credentials_store = \"file\"" + Environment.NewLine);
         }
 
-        UpsertMetadata(validName, validName);
+        UpsertMetadata(validName, validName, desktopSession: false);
         return directory;
     }
 
     public bool RemoveIncompleteProfileDirectory(string directoryName)
     {
+        new DesktopSessionService(paths).RequireNoPendingOperation();
         string validName = ProfileName.RequireValid(directoryName);
         string directory = Path.GetFullPath(Path.Combine(paths.ProfilesDirectory, validName));
         EnsureInsideProfilesRoot(directory);
@@ -111,7 +115,7 @@ public sealed class ProfileManagerService
             return false;
         }
 
-        if (File.Exists(Path.Combine(directory, "auth.json")))
+        if (File.Exists(Path.Combine(directory, "auth.json")) || new DesktopSessionService(paths).IsDesktopProfile(validName))
         {
             return false;
         }
@@ -123,6 +127,7 @@ public sealed class ProfileManagerService
 
     public void RenameDisplayName(string directoryName, string displayName)
     {
+        new DesktopSessionService(paths).RequireNoPendingOperation();
         string validName = ProfileName.RequireValid(directoryName);
         if (string.IsNullOrWhiteSpace(displayName))
         {
@@ -134,6 +139,7 @@ public sealed class ProfileManagerService
 
     public string RenameDirectory(string oldDirectoryName, string newDirectoryName)
     {
+        new DesktopSessionService(paths).RequireNoPendingOperation();
         string oldName = ProfileName.RequireValid(oldDirectoryName);
         string newName = ProfileName.RequireValid(newDirectoryName);
         string oldDirectory = Path.GetFullPath(Path.Combine(paths.ProfilesDirectory, oldName));
@@ -171,6 +177,7 @@ public sealed class ProfileManagerService
 
     public string RemoveProfile(string directoryName, string? activeProfile)
     {
+        new DesktopSessionService(paths).RequireNoPendingOperation();
         string validName = ProfileName.RequireValid(directoryName);
         if (string.Equals(validName, activeProfile, StringComparison.OrdinalIgnoreCase))
         {
@@ -182,6 +189,14 @@ public sealed class ProfileManagerService
         if (!Directory.Exists(source))
         {
             throw new DirectoryNotFoundException("Profile directory was not found.");
+        }
+
+        if (new DesktopSessionService(paths).IsDesktopProfile(validName))
+        {
+            if (string.Equals(validName, new ActiveProfileStore(paths.ActiveProfileFile).Read(), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The active Desktop profile cannot be removed.");
+            DesktopSnapshot.RejectLinks(source);
+            DesktopSnapshot.RejectLinks(paths.RemovedProfilesDirectory);
         }
 
         ProfileMetadataDocument document = metadataStore.Load();
@@ -243,6 +258,7 @@ public sealed class ProfileManagerService
 
     public void Reorder(IReadOnlyList<string> orderedDirectoryNames)
     {
+        new DesktopSessionService(paths).RequireNoPendingOperation();
         ProfileMetadataDocument document = metadataStore.Load();
         for (int index = 0; index < orderedDirectoryNames.Count; index++)
         {
@@ -261,14 +277,21 @@ public sealed class ProfileManagerService
         metadataStore.Save(document);
     }
 
-    private void UpsertMetadata(string directoryName, string displayName)
+    private void UpsertMetadata(string directoryName, string displayName, bool? desktopSession = null)
     {
         ProfileMetadataDocument document = metadataStore.Load();
+        UpsertMetadata(document, directoryName, displayName, desktopSession);
+        metadataStore.Save(document);
+    }
+
+    internal static void UpsertMetadata(ProfileMetadataDocument document, string directoryName, string displayName, bool? desktopSession)
+    {
         ProfileMetadata? item = document.Profiles.FirstOrDefault(profile => string.Equals(profile.DirectoryName, directoryName, StringComparison.OrdinalIgnoreCase));
         if (item is null)
         {
             int order = document.Profiles.Count == 0 ? 0 : document.Profiles.Max(static profile => profile.Order) + 1;
-            document.Profiles.Add(CreateMetadata(directoryName, order, displayName));
+            item = CreateMetadata(directoryName, order, displayName);
+            document.Profiles.Add(item);
         }
         else
         {
@@ -276,8 +299,7 @@ public sealed class ProfileManagerService
             item.Initials = CreateInitials(displayName, directoryName);
             item.Hidden = false;
         }
-
-        metadataStore.Save(document);
+        if (desktopSession.HasValue) item.DesktopSession = desktopSession.Value;
     }
 
     private void RemoveMetadata(string directoryName)

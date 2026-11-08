@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
+using CodexProfileOverlay.Core.Services;
 using System.Windows.Interop;
 using CodexProfileOverlay.Core.Models;
 
@@ -8,11 +10,14 @@ internal sealed class HotkeyManager : IDisposable
 {
     private readonly HwndSource source;
     private readonly Dictionary<int, HotkeyRegistration> registrations = [];
+    private readonly SafeLogger logger;
+    private readonly HashSet<int> pendingRemoval = [];
     private int nextId = 100;
     private bool disposed;
 
-    public HotkeyManager(IntPtr hwnd)
+    public HotkeyManager(IntPtr hwnd, SafeLogger logger)
     {
+        this.logger = logger;
         source = HwndSource.FromHwnd(hwnd) ?? throw new InvalidOperationException("Could not attach hotkey manager to a window handle.");
         source.AddHook(WndProc);
     }
@@ -45,12 +50,19 @@ internal sealed class HotkeyManager : IDisposable
 
     public void Clear()
     {
-        foreach (int id in registrations.Keys.ToArray())
-        {
-            _ = NativeMethods.UnregisterHotKey(source.Handle, id);
-        }
-
+        pendingRemoval.UnionWith(registrations.Keys);
         registrations.Clear();
+        foreach (int id in pendingRemoval.ToArray())
+        {
+            if (NativeMethods.UnregisterHotKey(source.Handle, id))
+            {
+                pendingRemoval.Remove(id);
+                continue;
+            }
+            int error = Marshal.GetLastPInvokeError();
+            if (error == 1419) pendingRemoval.Remove(id); // ERROR_HOTKEY_NOT_REGISTERED
+            logger.Error("Could not unregister a hotkey.", new Win32Exception(error));
+        }
     }
 
     public void Dispose()
@@ -76,7 +88,9 @@ internal sealed class HotkeyManager : IDisposable
             return true;
         }
 
-        conflict = $"{gesture} could not be registered ({new Win32Exception().Message}).";
+        var error = new Win32Exception(Marshal.GetLastPInvokeError());
+        logger.Error("Could not register a hotkey.", error);
+        conflict = $"{gesture} could not be registered (Win32 {error.NativeErrorCode}: {error.Message}).";
         return false;
     }
 

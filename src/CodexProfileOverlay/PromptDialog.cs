@@ -10,12 +10,13 @@ namespace CodexProfileOverlay;
 internal sealed class PromptDialog : Window
 {
     private readonly TextBox textBox;
+    private bool alternateSelected;
 
-    private PromptDialog(string title, string label, string initialValue, string primaryText, string cancelText)
+    private PromptDialog(string title, string label, string initialValue, string primaryText, string cancelText, string? alternateText)
     {
         Title = title;
         Icon = AppIcons.WindowIcon;
-        Width = 460;
+        Width = alternateText is null ? 460 : 560;
         Height = 224;
         WindowStartupLocation = WindowStartupLocation.Manual;
         ResizeMode = ResizeMode.NoResize;
@@ -105,6 +106,17 @@ internal sealed class PromptDialog : Window
             Close();
         };
         buttons.Children.Add(ok);
+        if (alternateText is not null)
+        {
+            var alternate = new Button { Content = alternateText, MinWidth = 108, MinHeight = 36, Margin = new Thickness(0, 0, 8, 0) };
+            alternate.Click += (_, _) =>
+            {
+                alternateSelected = true;
+                DialogResult = true;
+                Close();
+            };
+            buttons.Children.Add(alternate);
+        }
         Button cancel = new() { Content = cancelText, MinWidth = 96, MinHeight = 36, IsCancel = true };
         buttons.Children.Add(cancel);
         Grid.SetRow(buttons, 4);
@@ -132,7 +144,15 @@ internal sealed class PromptDialog : Window
 
     public static string? Show(Window? owner, IntPtr nativeOwner, string title, string label, string initialValue = "", string primaryText = "OK", string cancelText = "Cancel")
     {
-        var dialog = new PromptDialog(title, label, initialValue, primaryText, cancelText);
+        return ShowCore(owner, nativeOwner, new PromptDialog(title, label, initialValue, primaryText, cancelText, null)).Name;
+    }
+
+    public static (string? Name, bool Capture) ShowProfileChoice(Window? owner, IntPtr nativeOwner, Localizer localizer) =>
+        ShowCore(owner, nativeOwner, new PromptDialog(localizer["AddProfileTitle"], localizer["ProfileDirectoryName"],
+            "", localizer["BrowserLogin"], localizer["Cancel"], localizer["DesktopCapture"]));
+
+    private static (string? Name, bool Capture) ShowCore(Window? owner, IntPtr nativeOwner, PromptDialog dialog)
+    {
         if (owner is not null)
         {
             dialog.Owner = owner;
@@ -147,6 +167,6 @@ internal sealed class PromptDialog : Window
         }
 
         DialogPlacement.CenterOnOwnerScreen(dialog, owner, nativeOwner);
-        return dialog.ShowDialog() == true ? dialog.Value : null;
+        return dialog.ShowDialog() == true ? (dialog.Value, dialog.alternateSelected) : (null, false);
     }
 }
