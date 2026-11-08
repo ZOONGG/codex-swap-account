@@ -9,19 +9,26 @@ namespace CodexProfileOverlay.Core.Services;
 public sealed class DesktopAccountChangedException : Exception { }
 
 /// <summary>Writes each rename intent before touching live files. All renames stay on their source volume.</summary>
-public sealed class DesktopSessionService
+public sealed partial class DesktopSessionService
 {
     private readonly AppPaths paths;
     private readonly ActiveProfileStore active;
     private readonly Action<string, string> move;
+    private readonly SafeLogger? logger;
+    private readonly Func<DateTimeOffset> utcNow;
+    private static readonly object RetentionGate = new();
+    private static int transactionsStarting;
     private string JournalRoot => Path.Combine(paths.ApplicationDataDirectory, "desktop-recovery");
     private string PendingFile => Path.Combine(JournalRoot, "pending.json");
 
-    public DesktopSessionService(AppPaths paths, Action<string, string>? move = null)
+    public DesktopSessionService(AppPaths paths, Action<string, string>? move = null,
+        SafeLogger? logger = null, Func<DateTimeOffset>? utcNow = null)
     {
         this.paths = paths;
         active = new ActiveProfileStore(paths.ActiveProfileFile);
         this.move = move ?? MoveDurably;
+        this.logger = logger;
+        this.utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
     }
 
     public bool HasPendingOperation => DesktopSnapshot.Exists(PendingFile);
@@ -149,7 +156,7 @@ public sealed class DesktopSessionService
         Apply(layout, verifyStopped, token);
     }
 
-    public void Complete(string live)
+    public void Complete(string live, bool restartVerified = false)
     {
         var layout = ReadLayout(live);
         DesktopSnapshot.RejectLinks(layout.Applied);
@@ -162,6 +169,19 @@ public sealed class DesktopSessionService
                 throw new IOException("The Desktop operation did not apply all of its changes.");
         }
         Finish(layout, "committed.json");
+        if (restartVerified && !layout.IsCapture)
+        {
+            // A crash before the receipt is durable leaves an ineligible commit.
+            try
+            {
+                WriteMarker(layout.JournalDirectory, Path.Combine(layout.JournalDirectory, RestartReceiptName),
+                    JsonSerializer.SerializeToUtf8Bytes(new RestartReceipt(layout.Id, utcNow())));
+            }
+            catch (Exception error) when (IsRetentionError(error))
+            {
+                logger?.Error("Could not record Desktop restart for retention.", error);
+            }
+        }
     }
 
     public void Recover(string live, Action verifyStopped)
@@ -213,6 +233,18 @@ public sealed class DesktopSessionService
 
     private Journal Begin(string name, string live, bool capture)
     {
+        // Retention yields between entries. Once pending.json is published, it skips the
+        // entire transaction until completion or recovery has moved that journal aside.
+        Interlocked.Increment(ref transactionsStarting);
+        try
+        {
+            lock (RetentionGate) return BeginCore(name, live, capture);
+        }
+        finally { Interlocked.Decrement(ref transactionsStarting); }
+    }
+
+    private Journal BeginCore(string name, string live, bool capture)
+    {
         RequireNoPendingOperation();
         ValidateLivePath(live);
         DesktopSnapshot.RejectLinks(paths.SharedAuthFile);
@@ -248,16 +280,19 @@ public sealed class DesktopSessionService
         RequireLocalVolume(paths.UserProfile);
         RequireLocalVolume(paths.LocalAppData);
         var journal = ReadJournal();
-        if (journal.Id == Guid.Empty || journal.LiveFingerprint != Fingerprint(live)
-            || !ProfileName.IsValid(journal.Target) || (journal.Previous is not null && !ProfileName.IsValid(journal.Previous))
-            || (journal.PreviousDesktop && (journal.Previous is null || journal.Target.Equals(journal.Previous, StringComparison.OrdinalIgnoreCase)))
-            || (journal.Capture && (journal.TargetDesktop || journal.PreviousDesktop))
-            || (!journal.Capture && !journal.TargetDesktop && !journal.PreviousDesktop))
+        if (!IsValidJournal(journal) || journal.LiveFingerprint != Fingerprint(live))
             throw new InvalidDataException("Desktop recovery journal does not match this installation.");
         var layout = new Layout(paths, journal, live);
         DesktopSnapshot.RejectLinks(layout.JournalDirectory);
         return layout;
     }
+
+    private static bool IsValidJournal(Journal journal) =>
+        !(journal.Id == Guid.Empty
+            || !ProfileName.IsValid(journal.Target) || (journal.Previous is not null && !ProfileName.IsValid(journal.Previous))
+            || (journal.PreviousDesktop && (journal.Previous is null || journal.Target.Equals(journal.Previous, StringComparison.OrdinalIgnoreCase)))
+            || (journal.Capture && (journal.TargetDesktop || journal.PreviousDesktop))
+            || (!journal.Capture && !journal.TargetDesktop && !journal.PreviousDesktop));
 
     private void Finish(Layout layout, string filename)
     {
@@ -321,8 +356,7 @@ public sealed class DesktopSessionService
 
     private void ValidateLivePath(string live)
     {
-        if (!Path.IsPathFullyQualified(live) || !string.Equals(Path.GetFullPath(live), live, StringComparison.Ordinal)
-            || (OperatingSystem.IsWindows() && (live.Length < 4 || live[1] != ':')))
+        if (!IsCanonicalLocalPath(live) || (OperatingSystem.IsWindows() && live.Length < 4))
             throw new IOException("Desktop sessions require a verified local data directory.");
         foreach (string reserved in new[] { paths.SharedCodexDirectory, paths.ProfilesDirectory, paths.ApplicationDataDirectory })
         {
@@ -331,11 +365,15 @@ public sealed class DesktopSessionService
         }
         DesktopSnapshot.RejectLinks(live);
         RequireLocalVolume(live);
-
-        static bool Within(string candidate, string root) =>
-            candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
-            || candidate.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsCanonicalLocalPath(string path) =>
+        Path.IsPathFullyQualified(path) && string.Equals(Path.GetFullPath(path), path, StringComparison.Ordinal)
+        && (!OperatingSystem.IsWindows() || path[1] == ':');
+
+    private static bool Within(string candidate, string root) =>
+        candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
+        || candidate.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
     private static void RequireLocalVolume(string path)
     {
@@ -371,6 +409,10 @@ public sealed class DesktopSessionService
     {
         private string Suffix => " .desktop-" + journal.Id.ToString("N");
         public string JournalDirectory => Path.Combine(paths.ApplicationDataDirectory, "desktop-recovery", journal.Id.ToString("N"));
+        public Guid Id => journal.Id;
+        public bool IsCapture => journal.Capture;
+        public string OriginalLive => Path.Combine(LiveWorkspace, "original");
+        public string OriginalProfileSession => Path.Combine(ProfileWorkspace, "original-" + DesktopSnapshot.DirectoryName);
         public string ProfileStage => Path.Combine(ProfileWorkspace, "staged");
         public string AuthWorkspace => Path.Combine(paths.UserProfile, Suffix);
         public string LiveWorkspace => Path.Combine(Path.GetDirectoryName(live)!, Suffix);
@@ -400,13 +442,14 @@ public sealed class DesktopSessionService
                     foreach (string file in new[] { "auth.json", DesktopSnapshot.DirectoryName, DesktopSnapshot.ManifestName })
                     {
                         bool directory = file == DesktopSnapshot.DirectoryName;
-                        result.Add(new(Path.Combine(Previous!, file), Path.Combine(ProfileWorkspace, "original-" + file), directory));
+                        string original = directory ? OriginalProfileSession : Path.Combine(ProfileWorkspace, "original-" + file);
+                        result.Add(new(Path.Combine(Previous!, file), original, directory));
                         result.Add(new(Path.Combine(ProfileStage, file), Path.Combine(Previous!, file), directory));
                     }
                 }
                 if (journal.TargetDesktop)
                 {
-                    result.Add(new(live, Path.Combine(LiveWorkspace, "original"), true));
+                    result.Add(new(live, OriginalLive, true));
                     result.Add(new(NewLive, live, true));
                 }
                 result.Add(new(paths.SharedAuthFile, Path.Combine(AuthWorkspace, "original-auth.json")));

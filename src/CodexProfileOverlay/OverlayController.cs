@@ -64,7 +64,7 @@ internal sealed class OverlayController : IDisposable
         this.activeProfileStore = activeProfileStore;
         this.settingsService = settingsService;
         this.switchService = switchService;
-        desktopSessions = new DesktopSessionService(paths);
+        desktopSessions = new DesktopSessionService(paths, logger: logger);
         this.processService = processService;
         this.startupRegistrationService = startupRegistrationService;
         this.logger = logger;
@@ -106,7 +106,21 @@ internal sealed class OverlayController : IDisposable
         Tick();
         var updateCancellation = disposalTokenSource.Token;
         _ = Task.Run(() => CheckForUpdatesAtStartupAsync(updateCancellation));
+        _ = Task.Run(() => RunDesktopRetentionAsync(updateCancellation));
         if (afterInstallation) overlayWindow?.ShowNotification(localizer.Format("UpdateInstalledVersion", updates.CurrentVersion));
+    }
+
+    private async Task RunDesktopRetentionAsync(CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
+        try
+        {
+            do
+            {
+                desktopSessions.TryCleanupCompletedSessions(WindowsDesktopStorage.Candidates(paths), token);
+            } while (await timer.WaitForNextTickAsync(token));
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
 
     private async Task CheckForUpdatesAtStartupAsync(CancellationToken cancellation)
@@ -573,6 +587,7 @@ internal sealed class OverlayController : IDisposable
             lease.Dispose();
             lease = null;
 
+            bool restartVerified = false;
             if (capture || recovery || settings.LaunchCodexAfterSwitching)
             {
                 failure = "DesktopLaunchFailed";
@@ -581,8 +596,9 @@ internal sealed class OverlayController : IDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(750), token);
                 if (window is null || windowFinder.RefreshKnownWindow(window) is null)
                     throw new InvalidOperationException("Codex did not keep a verified window after relaunch.");
+                restartVerified = true;
             }
-            if (!recovery) desktopSessions.Complete(live);
+            if (!recovery) desktopSessions.Complete(live, restartVerified);
             if (capture)
             {
                 accountStates[name!] = AccountAvailability.Available;

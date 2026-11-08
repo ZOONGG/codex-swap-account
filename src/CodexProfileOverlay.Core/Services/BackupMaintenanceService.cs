@@ -14,7 +14,7 @@ public sealed class BackupMaintenanceService
     public const long MaximumCompletedStorageBytes = 100L * 1024 * 1024;
 
     private static readonly TimeSpan CompletedMaximumAge = TimeSpan.FromDays(7);
-    private static readonly TimeSpan TemporaryMaximumAge = TimeSpan.FromHours(24);
+    internal static readonly TimeSpan TemporaryMaximumAge = TimeSpan.FromHours(24);
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private static readonly Regex LegacyStateName = new(
         "^state-[0-9]{8}-[0-9]{6}-[0-9]{3}-[0-9a-f]{32}$",

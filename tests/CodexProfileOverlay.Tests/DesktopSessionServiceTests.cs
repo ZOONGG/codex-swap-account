@@ -23,6 +23,180 @@ public sealed class DesktopSessionServiceTests
         Assert.Equal("history", File.ReadAllText(Path.Combine(fixture.Paths.SharedCodexDirectory, "history.txt")));
     }
 
+    [Fact]
+    public void RetentionWaitsForGracePeriodAndOnlyDeletesConfirmedChromiumCopies()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var fixture = new Fixture();
+        fixture.Capture("alpha", "a");
+        fixture.Capture("beta", "b");
+        var retired = fixture.SwitchWithReceipt("alpha");
+        fixture.Now += TimeSpan.FromHours(23);
+        fixture.Cleanup();
+        Assert.True(Directory.Exists(retired.Live));
+        Assert.True(Directory.Exists(retired.Profile));
+
+        fixture.Switch("beta"); // Committed without restart confirmation.
+        var unconfirmed = fixture.RetiredTrees().Single(tree => tree != retired);
+        string unrelated = Path.Combine(Path.GetDirectoryName(fixture.Live)!, $" .desktop-{Guid.NewGuid():N}", "original");
+        Directory.CreateDirectory(unrelated);
+        fixture.Now += TimeSpan.FromDays(8);
+        fixture.Service.TryCleanupCompletedSessions([fixture.OtherLive], default);
+        Assert.True(Directory.Exists(retired.Live));
+
+        fixture.Cleanup();
+        fixture.Cleanup();
+        Assert.False(Directory.Exists(retired.Live));
+        Assert.False(Directory.Exists(retired.Profile));
+        Assert.True(Directory.Exists(unconfirmed.Live));
+        Assert.True(Directory.Exists(unconfirmed.Profile));
+        Assert.True(Directory.Exists(unrelated));
+        Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(retired.Profile)!, "original-auth.json")));
+        Assert.True(File.Exists(Path.Combine(fixture.RecoveryRoot, retired.Id, "committed.json")));
+        fixture.AssertCurrent("beta", "b", "b");
+        Assert.Equal("a", fixture.Stored("alpha"));
+        Assert.Equal("b", fixture.Stored("beta"));
+        Assert.Equal(Auth("a"), fixture.Layout.ReadProfileAuth("alpha"));
+        Assert.Equal("history", File.ReadAllText(Path.Combine(fixture.Paths.SharedCodexDirectory, "history.txt")));
+    }
+
+    [Fact]
+    public async Task RetentionSkipsSwitchAndRecoveryInProgress()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var fixture = new Fixture();
+        fixture.Capture("alpha", "a");
+        fixture.Capture("beta", "b");
+        var retired = fixture.SwitchWithReceipt("alpha");
+        fixture.Now += TimeSpan.FromDays(8);
+        using var entered = new ManualResetEventSlim();
+        using var resume = new ManualResetEventSlim();
+        var switching = new DesktopSessionService(fixture.Paths, (source, destination) =>
+        {
+            Move(source, destination);
+            if (source != fixture.Live) return;
+            entered.Set();
+            if (!resume.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException();
+            throw new IOException("Interrupted switch");
+        });
+        var switchTask = Task.Run(() => Assert.Throws<IOException>(() =>
+            switching.Switch("beta", fixture.Live, CheckStopped, default)));
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            fixture.Cleanup();
+            Assert.True(Directory.Exists(retired.Live));
+        }
+        finally { resume.Set(); }
+        await switchTask;
+
+        string pending = Path.Combine(fixture.RecoveryRoot, "pending.json");
+        byte[] pendingBytes = File.ReadAllBytes(pending);
+        fixture.Cleanup();
+        Assert.Equal(pendingBytes, File.ReadAllBytes(pending));
+        var interrupted = fixture.RetiredTrees().Single(tree => tree != retired);
+        Assert.True(Directory.Exists(interrupted.Live));
+        Assert.True(Directory.Exists(interrupted.Profile));
+
+        entered.Reset();
+        resume.Reset();
+        var recovery = Task.Run(() => fixture.Service.Recover(fixture.Live, () =>
+        {
+            entered.Set();
+            if (!resume.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException();
+        }));
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            fixture.Cleanup();
+            Assert.True(Directory.Exists(retired.Live));
+        }
+        finally { resume.Set(); }
+        await recovery;
+        fixture.Cleanup();
+        Assert.False(Directory.Exists(retired.Live));
+        Assert.True(File.Exists(Path.Combine(fixture.RecoveryRoot, interrupted.Id, "rolled-back.json")));
+        Assert.True(Directory.Exists(Path.Combine(Path.GetDirectoryName(interrupted.Live)!, "incoming")));
+        fixture.AssertCurrent("alpha", "a", "a");
+    }
+
+    [Fact]
+    public void RetentionKeepsACommittedJournalWithAmbiguousRenameEvidence()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var fixture = new Fixture();
+        fixture.Capture("alpha", "a");
+        fixture.Capture("beta", "b");
+        var retired = fixture.SwitchWithReceipt("alpha");
+        fixture.Now += TimeSpan.FromDays(8);
+        string intent = Path.Combine(fixture.RecoveryRoot, retired.Id, "move-00.intent");
+        File.Copy(intent, intent + ".undone");
+
+        fixture.Cleanup();
+        Assert.True(Directory.Exists(retired.Live));
+        Assert.True(Directory.Exists(retired.Profile));
+        Assert.True(File.Exists(intent + ".undone"));
+        fixture.AssertCurrent("alpha", "a", "a");
+    }
+
+    [Fact]
+    public void RetentionCanRetryAfterAFileDeniesDeletion()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var fixture = new Fixture();
+        fixture.Capture("alpha", "a");
+        fixture.Capture("beta", "b");
+        var retired = fixture.SwitchWithReceipt("alpha");
+        fixture.Now += TimeSpan.FromDays(8);
+        string file = Path.Combine(retired.Profile, "Default", "fake-state");
+        using (File.Open(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            fixture.Cleanup();
+            Assert.False(Directory.Exists(retired.Live));
+            Assert.True(File.Exists(file));
+            Assert.True(File.Exists(Path.Combine(fixture.RecoveryRoot, retired.Id, "restart-verified.json")));
+            string log = File.ReadAllText(Directory.GetFiles(fixture.Paths.LogDirectory).Single());
+            Assert.Contains("Could not clean a completed Desktop session", log);
+            Assert.DoesNotContain(file, log);
+            Assert.DoesNotContain("fake-state", log);
+        }
+        fixture.Cleanup();
+        Assert.False(Directory.Exists(retired.Profile));
+        fixture.AssertCurrent("alpha", "a", "a");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RetentionRejectsJunctionsInWorkspaceOrChromiumTree(bool replaceWorkspace)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var fixture = new Fixture();
+        fixture.Capture("alpha", "a");
+        fixture.Capture("beta", "b");
+        var retired = fixture.SwitchWithReceipt("alpha");
+        fixture.Now += TimeSpan.FromDays(8);
+        string junction = Path.Combine(retired.Live, "external");
+        if (replaceWorkspace)
+        {
+            junction = Path.GetDirectoryName(retired.Live)!;
+            Directory.Move(junction, fixture.OtherLive);
+        }
+        else Directory.CreateDirectory(fixture.OtherLive);
+        string outside = Path.Combine(fixture.OtherLive, "outside");
+        File.WriteAllText(outside, "outside");
+        CreateJunction(junction, fixture.OtherLive);
+        try
+        {
+            fixture.Cleanup();
+            Assert.True(Directory.Exists(junction));
+            Assert.Equal("outside", File.ReadAllText(outside));
+            Assert.Equal("b", File.ReadAllText(Path.Combine(retired.Live, "Default", "fake-state")));
+            fixture.AssertCurrent("alpha", "a", "a");
+        }
+        finally { Directory.Delete(junction); }
+    }
+
     public static TheoryData<int, bool> RenameFailures()
     {
         var scenarios = new TheoryData<int, bool>();
@@ -252,17 +426,7 @@ public sealed class DesktopSessionServiceTests
         Directory.CreateDirectory(fixture.OtherLive);
         File.WriteAllText(Path.Combine(fixture.OtherLive, "outside.txt"), "outside");
         string junction = Path.Combine(fixture.Live, "external");
-        var cmd = new System.Diagnostics.ProcessStartInfo("cmd.exe") { CreateNoWindow = true, UseShellExecute = false };
-        cmd.ArgumentList.Add("/c");
-        cmd.ArgumentList.Add("mklink");
-        cmd.ArgumentList.Add("/J");
-        cmd.ArgumentList.Add(junction);
-        cmd.ArgumentList.Add(fixture.OtherLive);
-        using (var process = System.Diagnostics.Process.Start(cmd)!)
-        {
-            Assert.True(process.WaitForExit(5000));
-            Assert.Equal(0, process.ExitCode);
-        }
+        CreateJunction(junction, fixture.OtherLive);
         try
         {
             Assert.Throws<IOException>(() => fixture.Service.Capture("linked", fixture.Live, CheckStopped, default));
@@ -271,6 +435,21 @@ public sealed class DesktopSessionServiceTests
             Assert.Equal("outside", File.ReadAllText(Path.Combine(fixture.OtherLive, "outside.txt")));
         }
         finally { Directory.Delete(junction); }
+    }
+
+    private static void CreateJunction(string junction, string target)
+    {
+        var cmd = new System.Diagnostics.ProcessStartInfo("cmd.exe") { CreateNoWindow = true, UseShellExecute = false };
+        cmd.ArgumentList.Add("/c");
+        cmd.ArgumentList.Add("mklink");
+        cmd.ArgumentList.Add("/J");
+        cmd.ArgumentList.Add(junction);
+        cmd.ArgumentList.Add(target);
+        using (var process = System.Diagnostics.Process.Start(cmd)!)
+        {
+            Assert.True(process.WaitForExit(5000));
+            Assert.Equal(0, process.ExitCode);
+        }
     }
 
     [Fact]
@@ -375,13 +554,15 @@ public sealed class DesktopSessionServiceTests
         public DesktopSessionService Service { get; }
         public string Live => Path.Combine(Layout.LocalAppData, "chromium");
         public string OtherLive => Path.Combine(Layout.LocalAppData, "elsewhere");
+        public string RecoveryRoot => Path.Combine(Paths.ApplicationDataDirectory, "desktop-recovery");
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public string Profile(string name) => Path.Combine(Paths.ProfilesDirectory, name);
         public string StoredFile(string name) => Path.Combine(Profile(name), "desktop-session", "Default", "fake-state");
         public string Stored(string name) => File.ReadAllText(StoredFile(name));
 
         public Fixture()
         {
-            Service = new DesktopSessionService(Paths);
+            Service = new DesktopSessionService(Paths, logger: new SafeLogger(Paths.LogDirectory), utcNow: () => Now);
             File.WriteAllText(Path.Combine(Paths.SharedCodexDirectory, "history.txt"), "history");
         }
 
@@ -406,6 +587,24 @@ public sealed class DesktopSessionServiceTests
             Service.Switch(name, Live, CheckStopped, default);
             Service.Complete(Live);
         }
+
+        public (string Id, string Live, string Profile) SwitchWithReceipt(string name)
+        {
+            var existing = RetiredTrees().ToHashSet();
+            Service.Switch(name, Live, CheckStopped, default);
+            Service.Complete(Live, restartVerified: true);
+            return RetiredTrees().Single(tree => !existing.Contains(tree));
+        }
+
+        public IEnumerable<(string Id, string Live, string Profile)> RetiredTrees() =>
+            Directory.EnumerateDirectories(Path.GetDirectoryName(Live)!, " .desktop-*").Select(path =>
+            {
+                string workspace = Path.GetFileName(path);
+                return (workspace[" .desktop-".Length..], Path.Combine(path, "original"),
+                    Path.Combine(Paths.ProfilesDirectory, workspace, "original-desktop-session"));
+            });
+
+        public void Cleanup() => Service.TryCleanupCompletedSessions([Live], default);
 
         public void AssertCurrent(string? name, string id, string data)
         {
