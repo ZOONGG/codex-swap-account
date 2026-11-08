@@ -116,6 +116,8 @@ internal static class Program
             new SettingsService(paths.SettingsFile), null!, null!, null!, new SafeLogger(paths.LogDirectory), new BackupMaintenanceService(paths))!;
         Window? manager = null;
         Window? settingsWindow = null;
+        Task Remove(ProfileInfo profile) => (Task)Invoke(controller, "RemoveProfileAsync", profile)!;
+        Task? removal = null;
         try
         {
             var localizerType = assembly.GetType("CodexProfileOverlay.Localizer")!;
@@ -125,7 +127,7 @@ internal static class Program
                 p.ParameterType == typeof(IReadOnlyList<ProfileInfo>) ? (object)service.ListProfiles() :
                 p.ParameterType == typeof(string) ? "current" :
                 p.ParameterType == localizerType ? localizer :
-                p.Name == "removeProfile" ? (Action<ProfileInfo>)(profile => Invoke(controller, "RemoveProfile", profile)) :
+                p.Name == "removeProfile" ? (Action<ProfileInfo>)(profile => removal = Remove(profile)) :
                 p.ParameterType == typeof(Action<ProfileInfo>) ? (Action<ProfileInfo>)(_ => { }) :
                 p.ParameterType == typeof(Action<IReadOnlyList<string>>) ? (Action<IReadOnlyList<string>>)(_ => { }) :
                 p.ParameterType == typeof(Func<ProfileInfo, AccountAvailability>) ? (Func<ProfileInfo, AccountAvailability>)(_ => default) :
@@ -142,6 +144,7 @@ internal static class Program
                 p.ParameterType == typeof(UpdateService) ? Field(controller, "updates") :
                 p.ParameterType == typeof(Action<OverlaySettings>) ? (Action<OverlaySettings>)(_ => { }) :
                 p.ParameterType == typeof(Func<string, Task>) ? (Func<string, Task>)(_ => Task.CompletedTask) :
+                p.ParameterType == typeof(Func<string, Task<bool>>) ? (Func<string, Task<bool>>)(_ => Task.FromResult(false)) :
                 p.ParameterType == typeof(Func<bool>) ? (Func<bool>)(() => true) :
                 p.ParameterType == typeof(Action<bool>) ? (Action<bool>)(_ => { }) : (Action)(() => { })).ToArray();
             settingsWindow = (Window)settingsCtor.Invoke(settingsArgs);
@@ -154,7 +157,13 @@ internal static class Program
                 var row = rows.Items.OfType<ListBoxItem>().Single(i => ((ProfileInfo)i.Tag).Name == name);
                 return Descendants(row).OfType<Button>().Single().ContextMenu!.Items.OfType<MenuItem>().Last();
             }
-            void ClickRemove() => RemoveItem("old").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            void ClickRemove()
+            {
+                removal = null;
+                RemoveItem("old").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                Check(removal is { IsCompleted: true }, "Removal must finish with no background writer in the fixture");
+                removal!.GetAwaiter().GetResult();
+            }
             Check(!RemoveItem("current").IsEnabled, "Active profile removal must be disabled");
             int dialogs = 0, errors = 0;
             bool confirm = false;
@@ -174,7 +183,8 @@ internal static class Program
                     dialogs++;
                     Check(ReferenceEquals(dialog.Owner, manager), "Removal confirmation must belong to profile manager");
                     // A nested UI action must not enter a second removal during confirmation.
-                    Invoke(controller, "RemoveProfile", service.ListProfiles().Single(p => p.Name == "current"));
+                    Task nested = Remove(service.ListProfiles().Single(p => p.Name == "current"));
+                    Check(nested.IsCompletedSuccessfully, "Nested removal must return immediately");
                     if (escapeCancel)
                     {
                         dialog.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
@@ -380,6 +390,7 @@ internal static class Program
             p.ParameterType == typeof(UpdateService) ? updates :
             p.ParameterType == typeof(Action<OverlaySettings>) ? (Action<OverlaySettings>)(_ => { }) :
             p.ParameterType == typeof(Func<string, Task>) ? (Func<string, Task>)(_ => Task.CompletedTask) :
+            p.ParameterType == typeof(Func<string, Task<bool>>) ? (Func<string, Task<bool>>)(_ => Task.FromResult(false)) :
             p.ParameterType == typeof(Func<bool>) ? (Func<bool>)(() => true) :
             p.ParameterType == typeof(Action<bool>) ? (Action<bool>)(_ => { }) :
             (Action)(() => { })).ToArray();
