@@ -1,6 +1,6 @@
 # Windows installer and updates
 
-The product version is **1.1.0**, from `Directory.Build.props`. `publish.ps1`
+The candidate version is **1.1.1**, from `Directory.Build.props`. The published stable download is v1.1.0. `publish.ps1`
 reads the published executable's product version for Inno Setup. No release,
 tag, push or external publishing is performed by the build.
 
@@ -54,7 +54,7 @@ OS cleanup of temporary files is handled by downloading again.
 is ready. Downloads
 support progress, cancellation, size/time bounds and cleanup on failure. Only
 the exact official repository/tag/installer filename and a single exact
-SHA-256 manifest entry are accepted. Stable releases only are eligible.
+SHA-256 manifest entry are accepted. Stable releases only are eligible. Install a GitHub Pre-release manually.
 The file is rehashed with writes/deletion denied immediately before launch.
 A shared gate prevents overlapping downloads/installer launches; Inno's setup
 mutex prevents simultaneous installers. Active account switching is checked
@@ -96,7 +96,9 @@ sentinels survive. It never uses real credentials or switches accounts. Logs
 remain in the isolated artifact directory. This checks installer mechanics;
 it does not simulate a real GitHub release or run the actual application.
 
-Manual checks still required on a disposable Windows user/VM:
+The hosted Windows acceptance run upgraded the official v1.1.0 installer to the runner-built v1.1.1 and verified uninstall, synthetic data preservation and process startup. [Upgrade acceptance](https://github.com/ZOONGG/codex-swap-account/actions/runs/42510492683)
+
+Interactive checks on a disposable Windows user/VM remain open:
 
 - Install the actual Release payload; check Start Menu/optional desktop shortcut,
   startup toggle, uninstall and retained settings.

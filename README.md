@@ -51,7 +51,7 @@ The app runs quietly in the system tray and only shows the overlay when a verifi
 | | Feature |
 |---|---|
 | **Fast switching** | Switch accounts from the overlay, tray menu, or `Ctrl + Alt + 1…9`. |
-| **Shared Codex history** | Keep chats, projects, session history, and local Codex databases available from every account; only authorization changes. |
+| **Shared Codex history** | Keep chats, projects, session history, and local Codex databases available from every account; auth-only switching replaces authorization. |
 | **Compact and expanded modes** | Use a minimal dropdown or a one-click segmented profile bar. |
 | **Safe transaction** | Back up the active authorization and automatically roll back if switching fails. |
 | **Multi-monitor ready** | The overlay follows Codex across monitors, window moves, resizes, and DPI changes. |
@@ -166,7 +166,7 @@ The application remains in the system tray. Closing the settings window does not
 
 Hotkeys can be changed or cleared in **Settings → Hotkeys**. The app reports a conflict when Windows cannot register a shortcut.
 
-## How switching works
+## How auth-only switching works
 
 Codex normally stores local state under:
 
@@ -184,7 +184,7 @@ Codex Swap Account keeps both the directory and local state stable for every pro
 ├── history           ← shared by every profile
 ├── caches
 ├── databases
-└── auth.json         ← the only switched file
+└── auth.json         ← replaced by auth-only switching
 ```
 
 Saved account profiles are stored separately:
@@ -233,6 +233,10 @@ The **Add profile** flow:
 Failed or cancelled authorization preserves existing accounts and shared history. Reauthorize updates an existing account; applying authorization to the active account requires confirmation to close Codex safely. Account status is Available after recent successful sign-in, Sign-in required when confirmed by Codex, or Unknown when validity cannot be established.
 
 The app never displays or logs the credential contents.
+
+### Experimental Desktop Session Capture
+
+In the v1.1.1 candidate, choose **Add profile → Capture Desktop session** and confirm to save the signed-in Codex Desktop session. Existing profiles continue to use auth-only switching after upgrade. See the [Capture and recovery guide](docs/DESKTOP-SESSION-RECOVERY.md) for requirements and recovery steps. The built-in updater offers stable releases only.
 
 ## Display modes
 
