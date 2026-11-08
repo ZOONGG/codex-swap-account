@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
-if ($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or
+if ($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_EVENT_NAME -cnotin @('push', 'workflow_dispatch') -or
     $env:RELEASE_UPGRADE_RUNNER -cne 'github-hosted' -or -not $IsWindows) {
-    throw 'Run only via the manual GitHub-hosted Windows workflow.'
+    throw 'Run only via the GitHub-hosted Windows workflow.'
 }
 
 $report = Join-Path $env:RUNNER_TEMP 'release-upgrade.txt'

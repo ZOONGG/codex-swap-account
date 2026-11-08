@@ -1,6 +1,9 @@
 name: Windows release upgrade
 
 on:
+  push:
+    branches:
+      - codex/v1.1.1-stability
   workflow_dispatch:
 
 permissions:
